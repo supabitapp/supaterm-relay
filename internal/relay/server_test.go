@@ -37,11 +37,17 @@ func (c *logCapture) String() string {
 	return c.buf.String()
 }
 
-func TestHandlerPanicsAreLoggedWithoutThePeer(t *testing.T) {
+func captureLogs(t *testing.T) *logCapture {
+	t.Helper()
 	logs := &logCapture{}
 	previous := log.Writer()
 	log.SetOutput(logs)
 	t.Cleanup(func() { log.SetOutput(previous) })
+	return logs
+}
+
+func TestHandlerPanicsAreLoggedWithoutThePeer(t *testing.T) {
+	logs := captureLogs(t)
 	server := newHTTPServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panicFor(netip.MustParseAddr("203.0.113.77"))
 	}))
@@ -70,10 +76,7 @@ func TestHandlerPanicsAreLoggedWithoutThePeer(t *testing.T) {
 }
 
 func TestSocketPanicsAreLoggedWithoutThePeer(t *testing.T) {
-	logs := &logCapture{}
-	previous := log.Writer()
-	log.SetOutput(logs)
-	t.Cleanup(func() { log.SetOutput(previous) })
+	logs := captureLogs(t)
 	s := New(Config{AdmissionRate: 100, MaxConnectionsPerIP: 1})
 	handler := s.admit(false, func(http.ResponseWriter, *http.Request) func() {
 		return func() { panicFor(netip.MustParseAddr("203.0.113.77")) }
@@ -90,6 +93,25 @@ func TestSocketPanicsAreLoggedWithoutThePeer(t *testing.T) {
 		if strings.Contains(out, leak) {
 			t.Fatalf("panic log exposed the peer or frame arguments (%s):\n%s", leak, out)
 		}
+	}
+}
+
+func TestAbortedHandlersAndSocketsAreNotLogged(t *testing.T) {
+	logs := captureLogs(t)
+	server := httptest.NewServer(logPanicsWithoutPeer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	})))
+	t.Cleanup(server.Close)
+	if resp, err := http.Get(server.URL); err == nil {
+		resp.Body.Close()
+	}
+	s := New(Config{AdmissionRate: 100, MaxConnectionsPerIP: 1})
+	s.admit(false, func(http.ResponseWriter, *http.Request) func() {
+		return func() { panic(http.ErrAbortHandler) }
+	})(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/connect", nil))
+	waitForOpenConnections(t, s, 0, "socket exit")
+	if out := logs.String(); out != "" {
+		t.Fatalf("aborted requests should not be logged:\n%s", out)
 	}
 }
 

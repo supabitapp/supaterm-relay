@@ -20,17 +20,19 @@ import (
 )
 
 type handlerBarrier struct {
-	entered chan struct{}
-	block   func()
-	release func()
-	claimed atomic.Bool
+	entered  chan struct{}
+	returned chan struct{}
+	block    func()
+	release  func()
+	claimed  atomic.Bool
 }
 
 func newHandlerBarrier(t *testing.T) *handlerBarrier {
 	t.Helper()
 	entered, released := make(chan struct{}), make(chan struct{})
 	b := &handlerBarrier{
-		entered: entered,
+		entered:  entered,
+		returned: make(chan struct{}),
 		block: sync.OnceFunc(func() {
 			close(entered)
 			<-released
@@ -83,6 +85,7 @@ func TestClosingPairKeepsItsAdmissionSlot(t *testing.T) {
 			b = accept
 		}
 		if b != nil && b.claimed.CompareAndSwap(false, true) {
+			defer close(b.returned)
 			w = barrierResponseWriter{ResponseWriter: w, barrier: b}
 		}
 		s.http.Handler.ServeHTTP(w, r)
@@ -94,6 +97,8 @@ func TestClosingPairKeepsItsAdmissionSlot(t *testing.T) {
 	s.mu.Lock()
 	hostState := s.hosts[h.ID]
 	s.mu.Unlock()
+	waitForHandler(t, connect.returned, "connect handler return")
+	waitForHandler(t, accept.returned, "accept handler return")
 	expectPairMessage(t, client, host)
 	if err := client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)

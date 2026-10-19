@@ -92,8 +92,9 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) func() {
 	}
 
 	return func() {
-		go ctrl.writeLoop()
-		defer func() { <-ctrl.written }()
+		var writer sync.WaitGroup
+		writer.Go(ctrl.writeLoop)
+		defer writer.Wait()
 		ctrl.readControl()
 		s.removeHost(h)
 	}

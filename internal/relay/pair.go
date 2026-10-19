@@ -76,12 +76,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) func() {
 	s.pending++
 	p.timer = time.AfterFunc(s.cfg.PairTimeout, p.expire)
 	s.mu.Unlock()
-	serving := false
-	defer func() {
-		if !serving {
-			p.releaseSlot()
-		}
-	}()
+	defer p.releaseSlot()
 
 	ws, ok := s.upgrade(w, r, int64(s.cfg.MaxMessageBytes))
 	if !ok {
@@ -99,13 +94,9 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) func() {
 	p.client = cp
 	p.announced = true
 	h.notify(controlMessage{Type: "incoming", ConnectionID: p.id, Token: p.token})
+	serve := p.serve(cp)
 	s.mu.Unlock()
-
-	serving = true
-	return func() {
-		defer p.releaseSlot()
-		cp.readData(p)
-	}
+	return serve
 }
 
 func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) func() {
@@ -129,12 +120,7 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) func() {
 	p.state = accepting
 	p.refs++
 	s.mu.Unlock()
-	serving := false
-	defer func() {
-		if !serving {
-			p.releaseSlot()
-		}
-	}()
+	defer p.releaseSlot()
 
 	ws, ok := s.upgrade(w, r, int64(s.cfg.MaxMessageBytes))
 	if !ok {
@@ -155,12 +141,18 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) func() {
 	s.pending--
 	s.active++
 	close(p.ready)
+	serve := p.serve(hp)
 	s.mu.Unlock()
+	return serve
+}
 
-	serving = true
+// serve is called with s.mu held. The returned socket keeps its own claim on
+// the pair's admission slot until it closes.
+func (p *pair) serve(side *peer) func() {
+	p.refs++
 	return func() {
 		defer p.releaseSlot()
-		hp.readData(p)
+		side.readData(p)
 	}
 }
 

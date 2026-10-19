@@ -109,9 +109,7 @@ func logPanicsWithoutPeer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if v := recover(); v != nil {
-				if v != http.ErrAbortHandler {
-					log.Printf("relay: panic: %v\n%s", v, panicFrames())
-				}
+				logPanic(v)
 				panic(http.ErrAbortHandler)
 			}
 		}()
@@ -119,9 +117,15 @@ func logPanicsWithoutPeer(next http.Handler) http.Handler {
 	})
 }
 
+func logPanic(v any) {
+	if v != http.ErrAbortHandler {
+		log.Printf("relay: panic: %v\n%s", v, panicFrames())
+	}
+}
+
 func panicFrames() string {
 	pcs := make([]uintptr, 64)
-	frames := runtime.CallersFrames(pcs[:runtime.Callers(3, pcs)])
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(4, pcs)])
 	var b strings.Builder
 	for {
 		frame, more := frames.Next()
@@ -256,14 +260,12 @@ func (s *Server) admit(duringDrain bool, next func(http.ResponseWriter, *http.Re
 // buffers and handler stack while the socket stays open.
 func (s *Server) serveSocket(ip netip.Addr, serve func()) {
 	defer s.gate.Release(ip)
-	defer logSocketPanic()
+	defer func() {
+		if v := recover(); v != nil {
+			logPanic(v)
+		}
+	}()
 	serve()
-}
-
-func logSocketPanic() {
-	if v := recover(); v != nil {
-		log.Printf("relay: panic: %v\n%s", v, panicFrames())
-	}
 }
 
 type hostTraffic struct {

@@ -18,14 +18,13 @@ type peer struct {
 	traffic      *atomic.Int64
 	writeTimeout time.Duration
 	dead         chan struct{}
-	written      chan struct{}
 	cause        atomic.Pointer[closeMsg]
 	pingMu       sync.Mutex
 	pinger       *time.Timer
 }
 
 func (s *Server) newPeer(ws *websocket.Conn, q *queue, traffic *atomic.Int64) *peer {
-	p := &peer{s: s, ws: ws, q: q, traffic: traffic, writeTimeout: writeTimeout, dead: make(chan struct{}), written: make(chan struct{})}
+	p := &peer{s: s, ws: ws, q: q, traffic: traffic, writeTimeout: writeTimeout, dead: make(chan struct{})}
 	if traffic != nil {
 		p.writeTimeout = s.cfg.DeliveryTimeout
 	}
@@ -62,7 +61,6 @@ func (p *peer) ping() bool {
 }
 
 func (p *peer) writeLoop() {
-	defer close(p.written)
 	defer p.q.finish(closeMsg{websocket.CloseGoingAway, "writer stopped"}, true)
 	defer p.s.forget(p.ws)
 	ticker := time.NewTicker(p.s.cfg.Heartbeat)
@@ -200,16 +198,21 @@ func (p *peer) startPings() {
 func (p *peer) tick() {
 	p.pingMu.Lock()
 	defer p.pingMu.Unlock()
-	if p.pinger != nil && p.ping() {
+	select {
+	case <-p.dead:
+		return
+	default:
+	}
+	if p.ping() {
 		p.pinger.Reset(p.s.cfg.Heartbeat)
 	}
 }
 
-// stopPings waits for a ping in progress, so no write outlives the socket.
+// stopPings runs after exit and waits for a ping in progress, so no write
+// outlives the socket.
 func (p *peer) stopPings() {
 	p.pingMu.Lock()
 	p.pinger.Stop()
-	p.pinger = nil
 	p.pingMu.Unlock()
 }
 
