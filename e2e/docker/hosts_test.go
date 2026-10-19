@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	mrand "math/rand/v2"
 	"net/http"
@@ -438,9 +439,7 @@ func httpStatus(t *testing.T, method, url string, hdr http.Header) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for k, v := range hdr {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, hdr)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
