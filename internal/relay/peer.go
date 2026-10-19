@@ -116,8 +116,9 @@ func (p *peer) readControl() {
 	}
 }
 
-// Each data direction reads directly into the destination's fixed WebSocket
-// writer buffer. A stalled writer stops its source; no payload queue is kept.
+// Each data direction reads into the destination's fixed WebSocket writer
+// buffer. The socket batches available wire bytes, flushing before another
+// source read. A stalled flush stops its source.
 func (p *peer) readData(pr *pair) {
 	defer p.s.forget(p.ws)
 	defer p.stopPings()
@@ -134,6 +135,11 @@ func (p *peer) readData(pr *pair) {
 		out = pr.client
 	}
 	p.s.mu.Unlock()
+	input := p.ws.UnderlyingConn().(*batchConn)
+	output := out.ws.UnderlyingConn().(*batchConn)
+	output.enable()
+	input.flushBeforeRead = output
+	input.flushBeforeControls(p.ws)
 	progress := &progressReader{peer: p}
 	for {
 		typ, reader, err := p.ws.NextReader()
@@ -219,6 +225,10 @@ func (p *peer) stopPings() {
 func (p *peer) closeCause(err error) closeMsg {
 	if c := p.cause.Load(); c != nil {
 		return *c
+	}
+	var writeErr *forwardWriteError
+	if errors.As(err, &writeErr) {
+		return closeMsg{websocket.CloseTryAgainLater, "peer write timeout"}
 	}
 	var ce *websocket.CloseError
 	switch {

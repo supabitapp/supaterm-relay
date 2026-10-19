@@ -194,6 +194,20 @@ func TestPublicListenerServesDashboardAndMetrics(t *testing.T) {
 	}
 }
 
+func TestMetricsIncludeBatchBufferCapacity(t *testing.T) {
+	s := New(Config{})
+	response := httptest.NewRecorder()
+	s.handleMetrics(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	var metrics struct{ DataBufferBytesPerSocket int }
+	if err := json.Unmarshal(response.Body.Bytes(), &metrics); err != nil {
+		t.Fatal(err)
+	}
+	want := s.upgrader.ReadBufferSize + s.upgrader.WriteBufferSize + batchBufferSize
+	if metrics.DataBufferBytesPerSocket != want {
+		t.Fatalf("buffer capacity = %d, want %d", metrics.DataBufferBytesPerSocket, want)
+	}
+}
+
 func TestDashboardStatsMatchMetrics(t *testing.T) {
 	cfg, err := LoadConfig(env(nil))
 	if err != nil {
