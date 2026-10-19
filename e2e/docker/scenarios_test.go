@@ -42,13 +42,11 @@ func allReachable(t *testing.T, hosts []*host, label string, within time.Duratio
 	var wg sync.WaitGroup
 	errs := make(chan error, len(hosts))
 	for _, h := range hosts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := exchangeWithRetry(st.base, h, label+"-"+h.tag, 4, within); err != nil {
 				errs <- err
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)
@@ -119,9 +117,7 @@ func TestPairingOnRelay(t *testing.T) {
 	start := time.Now()
 	for _, h := range hosts {
 		for c := range 3 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				ws, code, err := connect(st.base, h.id)
 				if err != nil {
 					errs <- fmt.Errorf("connect %s: %d %v", h.tag, code, err)
@@ -133,11 +129,9 @@ func TestPairingOnRelay(t *testing.T) {
 					return
 				}
 				messages.Add(120)
-			}()
+			})
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ws, code, err := connect(st.base, h.id)
 			if err != nil {
 				errs <- fmt.Errorf("connect %s: %d %v", h.tag, code, err)
@@ -149,7 +143,7 @@ func TestPairingOnRelay(t *testing.T) {
 				return
 			}
 			messages.Add(2000)
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)
