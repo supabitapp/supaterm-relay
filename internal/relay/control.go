@@ -24,6 +24,14 @@ const (
 	maxQueueMessages = 256
 )
 
+type controlMessage struct {
+	ConnectionID string `json:"connectionId,omitempty"`
+	EndpointID   string `json:"endpointId,omitempty"`
+	Nonce        string `json:"nonce,omitempty"`
+	Token        string `json:"token,omitempty"`
+	Type         string `json:"type"`
+}
+
 type host struct {
 	id           string
 	ctrl         *peer
@@ -35,7 +43,7 @@ type host struct {
 	bytesOut     atomic.Int64
 }
 
-func (h *host) notify(v any) {
+func (h *host) notify(v controlMessage) {
 	if !h.gone && !h.ctrl.q.push(textFrame(v)) {
 		h.ctrl.q.finish(closeMsg{websocket.CloseTryAgainLater, "control queue limit exceeded"}, true)
 	}
@@ -53,7 +61,7 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 	}
 	id := endpointID(pub)
 	nonce := randomB64(32)
-	challenge := textFrame(map[string]string{"type": "challenge", "nonce": nonce})
+	challenge := textFrame(controlMessage{Type: "challenge", Nonce: nonce})
 	_ = ws.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := ws.WriteMessage(challenge.typ, challenge.data); err != nil {
 		s.forget(ws)
@@ -68,7 +76,7 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 
 	ctrl := s.newPeer(ws, newQueue(maxQueueBytes, maxQueueMessages), nil)
 	h := &host{id: id, ctrl: ctrl, pairs: map[string]*pair{}, clientCounts: map[netip.Addr]int{}}
-	ctrl.q.push(textFrame(map[string]string{"type": "registered", "endpointId": id}))
+	ctrl.q.push(textFrame(controlMessage{Type: "registered", EndpointID: id}))
 	s.mu.Lock()
 	if s.draining.Load() {
 		s.mu.Unlock()
@@ -126,18 +134,21 @@ func (s *Server) removeHost(h *host) {
 	s.mu.Unlock()
 	var cleanup sync.WaitGroup
 	for _, p := range pairs {
-		cleanup.Add(1)
-		go func() {
-			defer cleanup.Done()
+		cleanup.Go(func() {
 			p.close(closeMsg{websocket.CloseGoingAway, "host offline"})
-		}()
+		})
 	}
 	cleanup.Wait()
 }
 
 func decodeB64(s string, n int) ([]byte, bool) {
+	// Strict decoding checks trailing bits; exact encoded and decoded lengths
+	// also rule out the CR/LF bytes that the decoder otherwise ignores.
+	if len(s) != base64.RawURLEncoding.EncodedLen(n) {
+		return nil, false
+	}
 	b, err := base64.RawURLEncoding.Strict().DecodeString(s)
-	if err != nil || len(b) != n || base64.RawURLEncoding.EncodeToString(b) != s {
+	if err != nil || len(b) != n {
 		return nil, false
 	}
 	return b, true

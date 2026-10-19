@@ -18,4 +18,6 @@ The container suite checks the public surface, pairing and ordered streaming acr
 
 The benchmark accepts `-url` for an existing relay or `-spawn` for a local process. Payload sizes, client counts, message window, and measurement duration are configurable. Spawned relays default the per-host client network quota to the host capacity and preserve an explicit `RELAY_MAX_CLIENTS_PER_HOST_PER_IP` value. Container benchmarks set that quota to the host capacity. Existing relays retain their [configured quotas](configuration.md). Verify payloads and stop on failed echoes when testing a live service.
 
+The [performance tuning notes](performance.md) cover component benchmarks, profiling, measured allocation reductions, and the Go 1.27 JSON v2 decision. Run those benchmarks separately from tests and other load generators.
+
 `make test` replays the fixed fuzz seeds. Run a campaign with `go test ./internal/relay -run '^$' -fuzz '^FuzzControlQueue$' -fuzztime=30s`, substituting the package and target. `FuzzPairLifecycle` opens real sockets and can exhaust local addresses, so bound it with `-fuzztime=1000x -parallel=1`.

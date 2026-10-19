@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -150,17 +151,29 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) netip.Addr {
 	if !isTrusted(ip, trusted) {
 		return ip
 	}
-	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
-	for i := len(hops) - 1; i >= 0; i-- {
-		hop, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
-		if err != nil {
-			return ip
+	return forwardedIP(r.Header.Values("X-Forwarded-For"), ip, trusted)
+}
+
+func forwardedIP(values []string, ip netip.Addr, trusted []netip.Prefix) netip.Addr {
+	// Walk header lines and their hops from the right without joining or
+	// splitting attacker-controlled headers into temporary allocations.
+	for _, value := range slices.Backward(values) {
+		for {
+			comma := strings.LastIndexByte(value, ',')
+			hop, err := netip.ParseAddr(strings.TrimSpace(value[comma+1:]))
+			if err != nil {
+				return ip
+			}
+			hop = hop.Unmap()
+			if !isTrusted(hop, trusted) {
+				return hop
+			}
+			ip = hop
+			if comma < 0 {
+				break
+			}
+			value = value[:comma]
 		}
-		hop = hop.Unmap()
-		if !isTrusted(hop, trusted) {
-			return hop
-		}
-		ip = hop
 	}
 	return ip
 }
@@ -179,7 +192,7 @@ func ParsePrefixes(v string) ([]netip.Prefix, error) {
 		return nil, nil
 	}
 	var out []netip.Prefix
-	for _, s := range strings.Split(v, ",") {
+	for s := range strings.SplitSeq(v, ",") {
 		p, err := netip.ParsePrefix(strings.TrimSpace(s))
 		if err != nil {
 			return nil, err

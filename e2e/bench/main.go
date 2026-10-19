@@ -144,7 +144,7 @@ func benchmark() error {
 
 func ints(v string) ([]int, error) {
 	var out []int
-	for _, f := range strings.Split(v, ",") {
+	for f := range strings.SplitSeq(v, ",") {
 		n, err := strconv.Atoi(strings.TrimSpace(f))
 		if err != nil || n <= 0 {
 			return nil, fmt.Errorf("invalid list %q", v)
@@ -232,9 +232,7 @@ func run(tg *target, size, n int) (result, error) {
 	var wg sync.WaitGroup
 	var dialErr atomic.Value
 	for i := range cs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ws, resp, err := endpoint.Connect(tg.base, tg.hosts[i%len(tg.hosts)].ID)
 			if err != nil {
 				if resp != nil {
@@ -245,7 +243,7 @@ func run(tg *target, size, n int) (result, error) {
 			}
 			ws.SetReadLimit(1 << 20)
 			cs[i] = &client{ws: ws}
-		}()
+		})
 	}
 	wg.Wait()
 	defer func() {
@@ -272,11 +270,9 @@ func run(tg *target, size, n int) (result, error) {
 		samplers <- m
 	}()
 	for _, c := range cs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			c.run(block, base, mStart, mEnd, stopAt)
-		}()
+		})
 	}
 	wg.Wait()
 	for name, s := range <-samplers {
@@ -395,7 +391,7 @@ func psStats(pid int) (int64, float64, error) {
 		return 0, 0, err
 	}
 	var cpu float64
-	for _, part := range strings.Split(strings.ReplaceAll(f[1], "-", ":"), ":") {
+	for part := range strings.SplitSeq(strings.ReplaceAll(f[1], "-", ":"), ":") {
 		v, err := strconv.ParseFloat(part, 64)
 		if err != nil {
 			return 0, 0, err

@@ -93,7 +93,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	p.client = cp
 	p.announced = true
-	h.notify(map[string]string{"type": "incoming", "connectionId": p.id, "token": p.token})
+	h.notify(controlMessage{Type: "incoming", ConnectionID: p.id, Token: p.token})
 	s.mu.Unlock()
 
 	cp.readData(p)
@@ -178,7 +178,7 @@ func (p *pair) closeWhen(c closeMsg, waitingOnly bool) {
 		s.pending--
 	}
 	if p.announced {
-		h.notify(map[string]string{"type": "closed", "connectionId": p.id})
+		h.notify(controlMessage{Type: "closed", ConnectionID: p.id})
 	}
 	client, hostPeer := p.client, p.hostPeer
 	s.mu.Unlock()
@@ -191,12 +191,10 @@ func (p *pair) closeWhen(c closeMsg, waitingOnly bool) {
 		if peer == nil {
 			continue
 		}
-		cleanup.Add(1)
-		go func() {
-			defer cleanup.Done()
+		cleanup.Go(func() {
 			_ = peer.ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(c.code, c.reason), deadline)
 			_ = peer.ws.Close()
-		}()
+		})
 	}
 	cleanup.Wait()
 	close(p.done)

@@ -67,7 +67,13 @@ func (q *queue) next() (frame, *closeMsg, bool) {
 	}
 	f := q.items[0]
 	q.items[0] = frame{}
-	q.items = q.items[1:]
+	if len(q.items) == 1 {
+		// Reuse the empty queue for the next notification instead of allocating
+		// a new backing array on every push/pop in the common unqueued case.
+		q.items = q.items[:0]
+	} else {
+		q.items = q.items[1:]
+	}
 	return f, nil, true
 }
 

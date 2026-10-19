@@ -18,13 +18,30 @@ func FuzzClientIP(f *testing.F) {
 		}
 		trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8")}
 		r := &http.Request{RemoteAddr: "[::ffff:203.0.113.7]:80", Header: make(http.Header)}
-		for _, value := range strings.Split(forwarded, "\n") {
+		for value := range strings.SplitSeq(forwarded, "\n") {
 			r.Header.Add("X-Forwarded-For", value)
 		}
 		if got := ClientIP(r, trusted); got != netip.MustParseAddr("203.0.113.7") {
 			t.Fatal("untrusted peer changed its identity through headers")
 		}
 		r.RemoteAddr = "127.0.0.1:80"
+		// Compare the allocation-free walk against the original joined-header
+		// semantics, including empty lines, malformed hops, and repeated fields.
+		want := netip.MustParseAddr("127.0.0.1")
+		hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+		for _, raw := range slices.Backward(hops) {
+			hop, err := netip.ParseAddr(strings.TrimSpace(raw))
+			if err != nil {
+				break
+			}
+			want = hop.Unmap()
+			if !isTrusted(want, trusted) {
+				break
+			}
+		}
+		if got := ClientIP(r, trusted); got != want {
+			t.Fatalf("forwarded %q: got %s, want %s", forwarded, got, want)
+		}
 		r.Header.Add("X-Forwarded-For", "198.51.100.7, 10.1.1.1")
 		if got := ClientIP(r, trusted); got != netip.MustParseAddr("198.51.100.7") {
 			t.Fatal("untrusted prefix changed the first untrusted hop from the right")
