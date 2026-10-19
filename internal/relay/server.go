@@ -219,7 +219,7 @@ func (s *Server) writeMetrics(w http.ResponseWriter, detailed bool) {
 	m["rateLimiterEntries"] = s.limiter.Size()
 	m["goroutines"] = runtime.NumGoroutine()
 	m["draining"] = s.draining.Load()
-	m["dataBufferBytesPerSocket"] = readBufferSize + writeBufferSize
+	m["dataBufferBytesPerSocket"] = readBufferSize + writeBufferSize + batchBufferSize
 	writeJSON(w, http.StatusOK, m)
 }
 
@@ -324,7 +324,7 @@ func (s *Server) rejectionCounts() (total int64, byReason map[string]int64) {
 }
 
 func (s *Server) upgrade(w http.ResponseWriter, r *http.Request, limit int64) (*websocket.Conn, bool) {
-	ws, err := s.upgrader.Upgrade(w, r, nil)
+	ws, err := s.upgrader.Upgrade(batchResponseWriter{w}, r, nil)
 	if err != nil {
 		return nil, false
 	}
