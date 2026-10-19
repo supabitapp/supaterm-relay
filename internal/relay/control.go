@@ -126,11 +126,9 @@ func (s *Server) removeHost(h *host) {
 	s.mu.Unlock()
 	var cleanup sync.WaitGroup
 	for _, p := range pairs {
-		cleanup.Add(1)
-		go func() {
-			defer cleanup.Done()
+		cleanup.Go(func() {
 			p.close(closeMsg{websocket.CloseGoingAway, "host offline"})
-		}()
+		})
 	}
 	cleanup.Wait()
 }

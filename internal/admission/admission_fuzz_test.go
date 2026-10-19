@@ -18,7 +18,7 @@ func FuzzClientIP(f *testing.F) {
 		}
 		trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8")}
 		r := &http.Request{RemoteAddr: "[::ffff:203.0.113.7]:80", Header: make(http.Header)}
-		for _, value := range strings.Split(forwarded, "\n") {
+		for value := range strings.SplitSeq(forwarded, "\n") {
 			r.Header.Add("X-Forwarded-For", value)
 		}
 		if got := ClientIP(r, trusted); got != netip.MustParseAddr("203.0.113.7") {

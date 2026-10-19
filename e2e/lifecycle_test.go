@@ -195,9 +195,7 @@ func TestHostRemovalClosesStalledPairsTogether(t *testing.T) {
 		for range count {
 			_, host, _ := pairUp(t, r, h)
 			healthy = append(healthy, host)
-			producers.Add(1)
-			go func() {
-				defer producers.Done()
+			producers.Go(func() {
 				for n := 0; ; n++ {
 					if n == 9 {
 						ready <- struct{}{}
@@ -207,7 +205,7 @@ func TestHostRemovalClosesStalledPairsTogether(t *testing.T) {
 						return
 					}
 				}
-			}()
+			})
 			// The destination does not consume data. Its TCP window eventually
 			// blocks the relay writer while the opposite peer can still read.
 		}

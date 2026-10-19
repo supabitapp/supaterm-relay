@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"maps"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -17,9 +18,7 @@ func unlimited(next http.Handler) http.Handler {
 func serve(t *testing.T, d *Dashboard, path string, header http.Header) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, path, nil)
-	for name, values := range header {
-		request.Header[name] = values
-	}
+	maps.Copy(request.Header, header)
 	response := httptest.NewRecorder()
 	d.ServeHTTP(response, request)
 	return response

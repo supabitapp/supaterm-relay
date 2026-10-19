@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -426,10 +427,8 @@ func expectClose(t *testing.T, ws *websocket.Conn, codes ...int) *websocket.Clos
 	if err != nil {
 		t.Fatalf("expected close %v, got %v", codes, err)
 	}
-	for _, c := range codes {
-		if ce.Code == c {
-			return ce
-		}
+	if slices.Contains(codes, ce.Code) {
+		return ce
 	}
 	t.Fatalf("expected close %v, got %d %q", codes, ce.Code, ce.Text)
 	return nil

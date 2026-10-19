@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -151,8 +152,8 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) netip.Addr {
 		return ip
 	}
 	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
-	for i := len(hops) - 1; i >= 0; i-- {
-		hop, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
+	for _, hop := range slices.Backward(hops) {
+		hop, err := netip.ParseAddr(strings.TrimSpace(hop))
 		if err != nil {
 			return ip
 		}
@@ -179,7 +180,7 @@ func ParsePrefixes(v string) ([]netip.Prefix, error) {
 		return nil, nil
 	}
 	var out []netip.Prefix
-	for _, s := range strings.Split(v, ",") {
+	for s := range strings.SplitSeq(v, ",") {
 		p, err := netip.ParsePrefix(strings.TrimSpace(s))
 		if err != nil {
 			return nil, err

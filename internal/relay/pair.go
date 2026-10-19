@@ -191,12 +191,10 @@ func (p *pair) closeWhen(c closeMsg, waitingOnly bool) {
 		if peer == nil {
 			continue
 		}
-		cleanup.Add(1)
-		go func() {
-			defer cleanup.Done()
+		cleanup.Go(func() {
 			_ = peer.ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(c.code, c.reason), deadline)
 			_ = peer.ws.Close()
-		}()
+		})
 	}
 	cleanup.Wait()
 	close(p.done)

@@ -45,9 +45,7 @@ func TestMultipleHostsNoCrossDelivery(t *testing.T) {
 	errs := make(chan error, hosts*clients)
 	for i := range hosts {
 		for c := range clients {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				ws, resp, err := endpoint.Connect(r.base, hs[i].ID)
 				if err != nil {
 					errs <- fmt.Errorf("connect %d/%d: %v %s", i, c, err, status(resp))
@@ -70,7 +68,7 @@ func TestMultipleHostsNoCrossDelivery(t *testing.T) {
 						return
 					}
 				}
-			}()
+			})
 		}
 	}
 	wg.Wait()
