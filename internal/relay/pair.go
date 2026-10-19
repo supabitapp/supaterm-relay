@@ -38,7 +38,7 @@ type pair struct {
 	refs      int
 }
 
-func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) func() {
 	id := r.URL.Query().Get("endpointId")
 	clientKey := admission.ClientKey(admission.ClientIP(r, s.cfg.TrustedProxies))
 	s.mu.Lock()
@@ -46,17 +46,17 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if h == nil {
 		s.mu.Unlock()
 		s.reject(w, http.StatusNotFound, "endpoint not found")
-		return
+		return nil
 	}
 	if h.clientSlots >= s.cfg.MaxClientsPerHost {
 		s.mu.Unlock()
 		s.reject(w, http.StatusServiceUnavailable, "client capacity reached")
-		return
+		return nil
 	}
 	if h.clientCounts[clientKey] >= s.cfg.MaxClientsPerHostPerIP {
 		s.mu.Unlock()
 		s.reject(w, http.StatusTooManyRequests, "client capacity for host reached")
-		return
+		return nil
 	}
 	p := &pair{
 		s:         s,
@@ -76,12 +76,17 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	s.pending++
 	p.timer = time.AfterFunc(s.cfg.PairTimeout, p.expire)
 	s.mu.Unlock()
-	defer p.releaseSlot()
+	serving := false
+	defer func() {
+		if !serving {
+			p.releaseSlot()
+		}
+	}()
 
 	ws, ok := s.upgrade(w, r, int64(s.cfg.MaxMessageBytes))
 	if !ok {
 		p.close(closeMsg{websocket.CloseInternalServerErr, "upgrade failed"})
-		return
+		return nil
 	}
 	cp := s.newPeer(ws, nil, &h.bytesOut)
 	s.mu.Lock()
@@ -89,17 +94,21 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		cause := p.cause
 		s.mu.Unlock()
 		s.closeNow(ws, cause)
-		return
+		return nil
 	}
 	p.client = cp
 	p.announced = true
 	h.notify(controlMessage{Type: "incoming", ConnectionID: p.id, Token: p.token})
 	s.mu.Unlock()
 
-	cp.readData(p)
+	serving = true
+	return func() {
+		defer p.releaseSlot()
+		cp.readData(p)
+	}
 }
 
-func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) func() {
 	q := r.URL.Query()
 	s.mu.Lock()
 	p := s.pairs[q.Get("connectionId")]
@@ -109,23 +118,28 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		s.mu.Unlock()
 		s.reject(w, http.StatusNotFound, "connection not found")
-		return
+		return nil
 	}
 	token := q.Get("token")
 	if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(p.token)) != 1 || p.state != pending || p.client == nil {
 		s.mu.Unlock()
 		s.reject(w, http.StatusForbidden, "invalid token")
-		return
+		return nil
 	}
 	p.state = accepting
 	p.refs++
 	s.mu.Unlock()
-	defer p.releaseSlot()
+	serving := false
+	defer func() {
+		if !serving {
+			p.releaseSlot()
+		}
+	}()
 
 	ws, ok := s.upgrade(w, r, int64(s.cfg.MaxMessageBytes))
 	if !ok {
 		p.close(closeMsg{websocket.CloseInternalServerErr, "host accept failed"})
-		return
+		return nil
 	}
 	hp := s.newPeer(ws, nil, &p.host.bytesIn)
 	s.mu.Lock()
@@ -133,7 +147,7 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 		cause := p.cause
 		s.mu.Unlock()
 		s.closeNow(ws, cause)
-		return
+		return nil
 	}
 	p.state = active
 	p.timer.Stop()
@@ -143,7 +157,11 @@ func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
 	close(p.ready)
 	s.mu.Unlock()
 
-	hp.readData(p)
+	serving = true
+	return func() {
+		defer p.releaseSlot()
+		hp.readData(p)
+	}
 }
 
 func (p *pair) expire() {

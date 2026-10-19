@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"runtime"
 	"strings"
 	"sync"
@@ -27,6 +28,8 @@ const (
 	writeTimeout     = 5 * time.Second
 	maxConnections   = 50_000
 	topHostsReported = 20
+	readBufferSize   = 1024
+	writeBufferSize  = 16 * 1024
 )
 
 type Server struct {
@@ -60,8 +63,8 @@ func New(cfg Config) *Server {
 		cfg: cfg,
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: writeTimeout,
-			ReadBufferSize:   4096,
-			WriteBufferSize:  16 * 1024,
+			ReadBufferSize:   readBufferSize,
+			WriteBufferSize:  writeBufferSize,
 			WriteBufferPool:  &sync.Pool{},
 			CheckOrigin:      func(*http.Request) bool { return true },
 		},
@@ -212,11 +215,13 @@ func (s *Server) writeMetrics(w http.ResponseWriter, detailed bool) {
 	m["rateLimiterEntries"] = s.limiter.Size()
 	m["goroutines"] = runtime.NumGoroutine()
 	m["draining"] = s.draining.Load()
-	m["dataBufferBytesPerSocket"] = 4096 + 16*1024
+	m["dataBufferBytesPerSocket"] = readBufferSize + writeBufferSize
 	writeJSON(w, http.StatusOK, m)
 }
 
-func (s *Server) admit(duringDrain bool, next http.HandlerFunc) http.HandlerFunc {
+// next returns the function that serves its upgraded socket, or nil once the
+// request is finished.
+func (s *Server) admit(duringDrain bool, next func(http.ResponseWriter, *http.Request) func()) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := admission.ClientIP(r, s.cfg.TrustedProxies)
 		switch s.gate.Acquire(ip) {
@@ -227,15 +232,37 @@ func (s *Server) admit(duringDrain bool, next http.HandlerFunc) http.HandlerFunc
 			s.reject(w, http.StatusTooManyRequests, "client connection capacity reached")
 			return
 		}
-		defer s.gate.Release(ip)
+		var serve func()
+		defer func() {
+			if serve == nil {
+				s.gate.Release(ip)
+			}
+		}()
 		switch {
 		case !duringDrain && s.draining.Load():
 			s.reject(w, http.StatusServiceUnavailable, "draining")
 		case !s.limiter.Allow(ip, time.Now()):
 			s.reject(w, http.StatusTooManyRequests, "rate limited")
 		default:
-			next(w, r)
+			serve = next(w, r)
 		}
+		if serve != nil {
+			go s.serveSocket(ip, serve)
+		}
+	}
+}
+
+// Sockets outlive their HTTP handler so net/http can free the request's
+// buffers and handler stack while the socket stays open.
+func (s *Server) serveSocket(ip netip.Addr, serve func()) {
+	defer s.gate.Release(ip)
+	defer logSocketPanic()
+	serve()
+}
+
+func logSocketPanic() {
+	if v := recover(); v != nil {
+		log.Printf("relay: panic: %v\n%s", v, panicFrames())
 	}
 }
 

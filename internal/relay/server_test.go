@@ -69,6 +69,30 @@ func TestHandlerPanicsAreLoggedWithoutThePeer(t *testing.T) {
 	}
 }
 
+func TestSocketPanicsAreLoggedWithoutThePeer(t *testing.T) {
+	logs := &logCapture{}
+	previous := log.Writer()
+	log.SetOutput(logs)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	s := New(Config{AdmissionRate: 100, MaxConnectionsPerIP: 1})
+	handler := s.admit(false, func(http.ResponseWriter, *http.Request) func() {
+		return func() { panicFor(netip.MustParseAddr("203.0.113.77")) }
+	})
+	r := httptest.NewRequest(http.MethodGet, "/v1/connect", nil)
+	handler(httptest.NewRecorder(), r)
+	waitForOpenConnections(t, s, 0, "socket exit")
+	out := logs.String()
+	if !strings.Contains(out, "relay: panic: handler failed") || !strings.Contains(out, "relay.panicFor") {
+		t.Fatalf("panic log should name the panic and its frames:\n%s", out)
+	}
+	peer, _, _ := net.SplitHostPort(r.RemoteAddr)
+	for _, leak := range []string{peer, "panicFor("} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("panic log exposed the peer or frame arguments (%s):\n%s", leak, out)
+		}
+	}
+}
+
 //go:noinline
 func panicFor(addr netip.Addr) {
 	if addr.IsValid() {

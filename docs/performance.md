@@ -4,7 +4,7 @@
 
 Keep production imports on `encoding/json` for now. **Go 1.27.2 already runs that API on the v2 engine**, retaining v1 semantics. Direct `encoding/json/v2` adoption is supported in this toolchain, but is not an automatic speedup and does not accelerate ciphertext forwarding.
 
-The measured wins here are bounded host ranking, typed control messages, allocation-free valid proxy-header parsing, reuse of empty control queues, and canonical Base64 validation without re-encoding. Forwarding buffers, deadlines, backpressure, admission limits, and CI/deployment gates are unchanged.
+The measured wins here are bounded host ranking, typed control messages, allocation-free valid proxy-header parsing, reuse of empty control queues, and canonical Base64 validation without re-encoding. Deadlines, backpressure, admission limits, and CI/deployment gates are unchanged. [Idle socket memory](#idle-socket-memory) covers per-socket buffers and goroutines.
 
 ## Local measurements
 
@@ -48,6 +48,39 @@ The separate-process echo check used four hosts, four messages in flight per cli
 | 64 KiB | 32 | 5,286 | 5,394 | 52.3 ms | 54.4 ms |
 
 These mixed changes on a shared workstation do **not** establish a steady-state throughput or latency improvement. The optimized operations occur during connection churn and metrics collection, not each forwarded message. The echo check did not load those operations concurrently, and is not a capacity or long-duration test.
+
+## Idle socket memory
+
+An idle paired user, one host control socket and two data sockets, holds about 38 KB of relay memory. At the fixed ceiling of 50,000 protocol connections that projects to about 640 MiB of resident memory, inside the 2 GiB Go memory target of the [production service](configuration.md).
+
+Three choices keep an idle socket small:
+
+- Each upgraded socket runs in a goroutine started after the upgrade, and the HTTP handler returns. `net/http` then frees the request's reader and writer buffers and the handler's stack. The goroutine holds the connection's admission slot until the socket closes and logs a panic without the peer, as the HTTP handlers do.
+- Gorilla reads through a 1 KiB buffer. Payload reads at least that large bypass it and land in the destination's pooled 16 KiB writer buffer, so its size mainly affects frame headers and small messages.
+- Data sockets ping from a timer instead of a goroutine. Control sockets keep a reader and a writer goroutine.
+
+Measured on Linux in Docker (arm64, 4 CPUs, Go 1.27.2, `GOMEMLIMIT=2GiB`) with 15,000 idle users, 20 seconds after setup and after two forced garbage collections. "Before" is `main` at `e652282`.
+
+| Measure | Paired users, before | Paired users, after | Hosts only, before | Hosts only, after |
+| --- | ---: | ---: | ---: | ---: |
+| Resident memory for 15,000 users | 1,512 MiB | 580 MiB | 604 MiB | 249 MiB |
+| Resident memory per socket | 34.1 KB | 12.8 KB | 40.3 KB | 15.9 KB |
+| Live heap per socket | 17.8 KB | 3.7 KB | 17.8 KB | 4.3 KB |
+| Goroutine stack per socket | 14.7 KB | 5.4 KB | 20.0 KB | 8.0 KB |
+| Goroutines per socket | 2 | 1.33 | 2 | 2 |
+
+Echo throughput in the same container stayed within run-to-run spread: four hosts, four messages in flight per client, a 2 s warmup and a 5 s window, two runs per build, and no failed or corrupt messages. Two runs of one build differed by up to 18%, for example 107,529 and 127,246 msg/s for 64 B with one client before the change.
+
+| Payload | Clients | Before msg/s | After msg/s |
+| --- | ---: | ---: | ---: |
+| 64 B | 1 | 117,388 | 127,091 |
+| 64 B | 32 | 273,262 | 275,683 |
+| 1 KiB | 1 | 119,814 | 113,106 |
+| 1 KiB | 32 | 220,903 | 219,364 |
+| 64 KiB | 1 | 10,928 | 10,118 |
+| 64 KiB | 32 | 13,480 | 13,136 |
+
+Waiting on idle sockets with epoll instead of a goroutine was measured and not adopted. In a standalone gobwas/ws forwarder, epoll lowered idle resident memory from 4.7 KB to 2.1 KB per socket, but cut small-message echo throughput by 14 to 40% and added about 20 µs of median latency. It also needs Linux-only code and a frame parser in place of Gorilla, and a client that sends part of a frame header holds a goroutine and a read buffer until its read deadline. The measurement harness and raw samples are under `spike/` at commit `c647a3d`.
 
 ## Should we use encoding/json/v2?
 

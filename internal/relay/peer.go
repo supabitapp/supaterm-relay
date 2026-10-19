@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,8 @@ type peer struct {
 	dead         chan struct{}
 	written      chan struct{}
 	cause        atomic.Pointer[closeMsg]
+	pingMu       sync.Mutex
+	pinger       *time.Timer
 }
 
 func (s *Server) newPeer(ws *websocket.Conn, q *queue, traffic *atomic.Int64) *peer {
@@ -119,9 +122,9 @@ func (p *peer) readControl() {
 // writer buffer. A stalled writer stops its source; no payload queue is kept.
 func (p *peer) readData(pr *pair) {
 	defer p.s.forget(p.ws)
-	defer func() { <-p.written }()
+	defer p.stopPings()
 	defer p.exit()
-	go p.keepAlive()
+	p.startPings()
 	select {
 	case <-pr.ready:
 	case <-pr.done:
@@ -188,20 +191,26 @@ func (r *progressReader) Read(b []byte) (int, error) {
 	return n, err
 }
 
-func (p *peer) keepAlive() {
-	defer close(p.written)
-	ticker := time.NewTicker(p.s.cfg.Heartbeat)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if !p.ping() {
-				return
-			}
-		case <-p.dead:
-			return
-		}
+func (p *peer) startPings() {
+	p.pingMu.Lock()
+	p.pinger = time.AfterFunc(p.s.cfg.Heartbeat, p.tick)
+	p.pingMu.Unlock()
+}
+
+func (p *peer) tick() {
+	p.pingMu.Lock()
+	defer p.pingMu.Unlock()
+	if p.pinger != nil && p.ping() {
+		p.pinger.Reset(p.s.cfg.Heartbeat)
 	}
+}
+
+// stopPings waits for a ping in progress, so no write outlives the socket.
+func (p *peer) stopPings() {
+	p.pingMu.Lock()
+	p.pinger.Stop()
+	p.pinger = nil
+	p.pingMu.Unlock()
 }
 
 func (p *peer) closeCause(err error) closeMsg {
