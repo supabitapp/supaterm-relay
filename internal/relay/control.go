@@ -49,15 +49,15 @@ func (h *host) notify(v controlMessage) {
 	}
 }
 
-func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) func() {
 	pub, ok := decodeB64(r.URL.Query().Get("publicKey"), ed25519.PublicKeySize)
 	if !ok {
 		s.reject(w, http.StatusBadRequest, "invalid publicKey")
-		return
+		return nil
 	}
 	ws, ok := s.upgrade(w, r, controlReadLimit)
 	if !ok {
-		return
+		return nil
 	}
 	id := endpointID(pub)
 	nonce := randomB64(32)
@@ -65,13 +65,13 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 	_ = ws.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := ws.WriteMessage(challenge.typ, challenge.data); err != nil {
 		s.forget(ws)
-		return
+		return nil
 	}
 	_ = ws.SetReadDeadline(time.Now().Add(s.cfg.AuthTimeout))
 	if !verifyAuth(ws, pub, id+"\n"+nonce) {
 		s.countRejection("authentication failed")
 		s.closeNow(ws, closeMsg{websocket.ClosePolicyViolation, "authentication failed"})
-		return
+		return nil
 	}
 
 	ctrl := s.newPeer(ws, newQueue(maxQueueBytes, maxQueueMessages), nil)
@@ -81,7 +81,7 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 	if s.draining.Load() {
 		s.mu.Unlock()
 		s.closeNow(ws, closeMsg{websocket.CloseGoingAway, "relay draining"})
-		return
+		return nil
 	}
 	old := s.hosts[id]
 	s.hosts[id] = h
@@ -91,10 +91,13 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
 		old.ctrl.q.finish(closeMsg{closeSuperseded, "registration superseded"}, true)
 	}
 
-	go ctrl.writeLoop()
-	defer func() { <-ctrl.written }()
-	ctrl.readControl()
-	s.removeHost(h)
+	return func() {
+		var writer sync.WaitGroup
+		writer.Go(ctrl.writeLoop)
+		defer writer.Wait()
+		ctrl.readControl()
+		s.removeHost(h)
+	}
 }
 
 func verifyAuth(ws *websocket.Conn, pub ed25519.PublicKey, challenge string) bool {

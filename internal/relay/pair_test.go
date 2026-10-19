@@ -97,17 +97,19 @@ func TestClosingPairKeepsItsAdmissionSlot(t *testing.T) {
 	s.mu.Lock()
 	hostState := s.hosts[h.ID]
 	s.mu.Unlock()
+	waitForHandler(t, connect.returned, "connect handler return")
+	waitForHandler(t, accept.returned, "accept handler return")
 	expectPairMessage(t, client, host)
 	if err := client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	waitForHandler(t, connect.returned, "connect handler exit")
+	waitForOpenConnections(t, s, 2, "connect socket exit")
 	waitForHandler(t, accept.entered, "accept terminal read")
 	expectClientCapacityReached(t, h)
 	expectClosingPairMetrics(t, s, 1)
 	expectHostClientQuota(t, s, hostState, 1)
 	accept.release()
-	waitForHandler(t, accept.returned, "accept handler exit")
+	waitForOpenConnections(t, s, 1, "accept socket exit")
 	expectClosingPairMetrics(t, s, 0)
 	expectHostClientQuota(t, s, hostState, 0)
 	if ev, err := h.Next(5 * time.Second); err != nil || ev.Type != "closed" {
@@ -137,6 +139,20 @@ func waitForHandler(t *testing.T, ch <-chan struct{}, milestone string) {
 	case <-ch:
 	case <-time.After(5 * time.Second):
 		t.Fatalf("timed out waiting for %s", milestone)
+	}
+}
+
+func waitForOpenConnections(t *testing.T, s *Server, want int, milestone string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if open, _ := s.gate.Stats(); open == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", milestone)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

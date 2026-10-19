@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,12 +18,13 @@ type peer struct {
 	traffic      *atomic.Int64
 	writeTimeout time.Duration
 	dead         chan struct{}
-	written      chan struct{}
 	cause        atomic.Pointer[closeMsg]
+	pingMu       sync.Mutex
+	pinger       *time.Timer
 }
 
 func (s *Server) newPeer(ws *websocket.Conn, q *queue, traffic *atomic.Int64) *peer {
-	p := &peer{s: s, ws: ws, q: q, traffic: traffic, writeTimeout: writeTimeout, dead: make(chan struct{}), written: make(chan struct{})}
+	p := &peer{s: s, ws: ws, q: q, traffic: traffic, writeTimeout: writeTimeout, dead: make(chan struct{})}
 	if traffic != nil {
 		p.writeTimeout = s.cfg.DeliveryTimeout
 	}
@@ -59,7 +61,6 @@ func (p *peer) ping() bool {
 }
 
 func (p *peer) writeLoop() {
-	defer close(p.written)
 	defer p.q.finish(closeMsg{websocket.CloseGoingAway, "writer stopped"}, true)
 	defer p.s.forget(p.ws)
 	ticker := time.NewTicker(p.s.cfg.Heartbeat)
@@ -119,9 +120,9 @@ func (p *peer) readControl() {
 // writer buffer. A stalled writer stops its source; no payload queue is kept.
 func (p *peer) readData(pr *pair) {
 	defer p.s.forget(p.ws)
-	defer func() { <-p.written }()
+	defer p.stopPings()
 	defer p.exit()
-	go p.keepAlive()
+	p.startPings()
 	select {
 	case <-pr.ready:
 	case <-pr.done:
@@ -188,20 +189,31 @@ func (r *progressReader) Read(b []byte) (int, error) {
 	return n, err
 }
 
-func (p *peer) keepAlive() {
-	defer close(p.written)
-	ticker := time.NewTicker(p.s.cfg.Heartbeat)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if !p.ping() {
-				return
-			}
-		case <-p.dead:
-			return
-		}
+func (p *peer) startPings() {
+	p.pingMu.Lock()
+	p.pinger = time.AfterFunc(p.s.cfg.Heartbeat, p.tick)
+	p.pingMu.Unlock()
+}
+
+func (p *peer) tick() {
+	p.pingMu.Lock()
+	defer p.pingMu.Unlock()
+	select {
+	case <-p.dead:
+		return
+	default:
 	}
+	if p.ping() {
+		p.pinger.Reset(p.s.cfg.Heartbeat)
+	}
+}
+
+// stopPings runs after exit and waits for a ping in progress, so no write
+// outlives the socket.
+func (p *peer) stopPings() {
+	p.pingMu.Lock()
+	p.pinger.Stop()
+	p.pingMu.Unlock()
 }
 
 func (p *peer) closeCause(err error) closeMsg {
