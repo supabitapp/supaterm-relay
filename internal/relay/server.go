@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"cmp"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -11,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -248,19 +246,32 @@ type hostTraffic struct {
 	Pairs    int    `json:"pairs"`
 }
 
+// topHosts is called with s.mu held. Keep only the small, sorted result rather
+// than allocating and sorting every host while blocking connection lifecycle work.
 func (s *Server) topHosts() []hostTraffic {
-	hosts := make([]hostTraffic, 0, len(s.hosts))
+	hosts := make([]hostTraffic, 0, min(len(s.hosts), topHostsReported))
 	for id, h := range s.hosts {
 		in, out := h.bytesIn.Load(), h.bytesOut.Load()
-		if in+out == 0 {
+		total := in + out
+		if total == 0 {
 			continue
 		}
-		hosts = append(hosts, hostTraffic{Endpoint: id[:16], BytesIn: in, BytesOut: out, Pairs: len(h.pairs)})
+		i := len(hosts)
+		if i == topHostsReported {
+			i--
+			if total <= hosts[i].BytesIn+hosts[i].BytesOut {
+				continue
+			}
+		} else {
+			hosts = append(hosts, hostTraffic{})
+		}
+		for i > 0 && total > hosts[i-1].BytesIn+hosts[i-1].BytesOut {
+			hosts[i] = hosts[i-1]
+			i--
+		}
+		hosts[i] = hostTraffic{Endpoint: id[:16], BytesIn: in, BytesOut: out, Pairs: len(h.pairs)}
 	}
-	slices.SortFunc(hosts, func(a, b hostTraffic) int {
-		return cmp.Compare(b.BytesIn+b.BytesOut, a.BytesIn+a.BytesOut)
-	})
-	return hosts[:min(len(hosts), topHostsReported)]
+	return hosts
 }
 
 func (s *Server) reject(w http.ResponseWriter, status int, msg string) {

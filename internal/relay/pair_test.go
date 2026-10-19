@@ -158,7 +158,7 @@ func expectClosingPairMetrics(t *testing.T, s *Server, want int) {
 	}
 }
 
-func registerHost(t *testing.T, base string) *endpoint.Host {
+func registerHost(t testing.TB, base string) *endpoint.Host {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -172,7 +172,7 @@ func registerHost(t *testing.T, base string) *endpoint.Host {
 	return h
 }
 
-func openPair(t *testing.T, h *endpoint.Host) (*websocket.Conn, *websocket.Conn) {
+func openPair(t testing.TB, h *endpoint.Host) (*websocket.Conn, *websocket.Conn) {
 	t.Helper()
 	client, _, err := endpoint.Connect(h.Base, h.ID)
 	if err != nil {

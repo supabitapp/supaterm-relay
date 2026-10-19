@@ -151,17 +151,29 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) netip.Addr {
 	if !isTrusted(ip, trusted) {
 		return ip
 	}
-	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
-	for _, hop := range slices.Backward(hops) {
-		hop, err := netip.ParseAddr(strings.TrimSpace(hop))
-		if err != nil {
-			return ip
+	return forwardedIP(r.Header.Values("X-Forwarded-For"), ip, trusted)
+}
+
+func forwardedIP(values []string, ip netip.Addr, trusted []netip.Prefix) netip.Addr {
+	// Walk header lines and their hops from the right without joining or
+	// splitting attacker-controlled headers into temporary allocations.
+	for _, value := range slices.Backward(values) {
+		for {
+			comma := strings.LastIndexByte(value, ',')
+			hop, err := netip.ParseAddr(strings.TrimSpace(value[comma+1:]))
+			if err != nil {
+				return ip
+			}
+			hop = hop.Unmap()
+			if !isTrusted(hop, trusted) {
+				return hop
+			}
+			ip = hop
+			if comma < 0 {
+				break
+			}
+			value = value[:comma]
 		}
-		hop = hop.Unmap()
-		if !isTrusted(hop, trusted) {
-			return hop
-		}
-		ip = hop
 	}
 	return ip
 }
