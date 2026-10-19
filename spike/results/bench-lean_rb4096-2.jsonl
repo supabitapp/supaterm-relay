@@ -1,0 +1,6 @@
+{"clients":1,"corrupt":0,"cpuPercentOfOneCore":96.6,"failures":0,"messagesPerSec":116305.8,"payloadBytes":64,"payloadMiBPerSec":7.1,"rttP50Micros":24.7,"rttP99Micros":81.3}
+{"clients":32,"corrupt":0,"cpuPercentOfOneCore":198.2,"failures":0,"messagesPerSec":268313.4,"payloadBytes":64,"payloadMiBPerSec":16.4,"rttP50Micros":226.6,"rttP99Micros":756.5}
+{"clients":1,"corrupt":0,"cpuPercentOfOneCore":89.6,"failures":0,"messagesPerSec":112194.2,"payloadBytes":1024,"payloadMiBPerSec":109.6,"rttP50Micros":24.5,"rttP99Micros":93.3}
+{"clients":32,"corrupt":0,"cpuPercentOfOneCore":187.8,"failures":0,"messagesPerSec":224131.6,"payloadBytes":1024,"payloadMiBPerSec":218.9,"rttP50Micros":269.6,"rttP99Micros":967.9}
+{"clients":1,"corrupt":0,"cpuPercentOfOneCore":99,"failures":0,"messagesPerSec":9747.4,"payloadBytes":65536,"payloadMiBPerSec":609.2,"rttP50Micros":321.1,"rttP99Micros":609.3}
+{"clients":32,"corrupt":0,"cpuPercentOfOneCore":135.6,"failures":0,"messagesPerSec":12937,"payloadBytes":65536,"payloadMiBPerSec":808.6,"rttP50Micros":5547.3,"rttP99Micros":44045.8}

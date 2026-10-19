@@ -1,0 +1,4 @@
+{"goroutines":4,"heapAllocBytes":181208,"heapInuseBytes":647168,"openSockets":0,"rssKiB":10520,"runtimeSysBytes":8747272,"sockets":0,"stackInuseBytes":524288,"users":0}
+{"goroutines":4,"heapAllocBytes":2431512,"heapInuseBytes":3293184,"openSockets":3000,"rssKiB":16028,"runtimeSysBytes":19065112,"sockets":3000,"stackInuseBytes":1736704,"users":1000}
+{"goroutines":4,"heapAllocBytes":9937152,"heapInuseBytes":11870208,"openSockets":15000,"rssKiB":33060,"runtimeSysBytes":48032024,"sockets":15000,"stackInuseBytes":2064384,"users":5000}
+{"goroutines":4,"heapAllocBytes":28514800,"heapInuseBytes":32505856,"openSockets":45000,"rssKiB":105944,"runtimeSysBytes":112752936,"sockets":45000,"stackInuseBytes":3506176,"users":15000}

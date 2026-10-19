@@ -1,0 +1,331 @@
+--- a/internal/relay/server.go	2026-10-19 09:48:31
++++ b/internal/relay/server.go	2026-10-19 09:57:25
+@@ -10,8 +10,10 @@
+ 	"maps"
+ 	"net"
+ 	"net/http"
++	"os"
+ 	"runtime"
+ 	"slices"
++	"strconv"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -31,6 +33,19 @@
+ 	topHostsReported = 20
+ )
+ 
++var (
++	spikeHandoff   = os.Getenv("SPIKE_HANDOFF") == "1"
++	spikePingTimer = os.Getenv("SPIKE_PINGTIMER") == "1"
++	spikeReadBuf   = envInt("SPIKE_READBUF", 4096)
++)
++
++func envInt(name string, def int) int {
++	if n, err := strconv.Atoi(os.Getenv(name)); err == nil {
++		return n
++	}
++	return def
++}
++
+ type Server struct {
+ 	cfg           Config
+ 	http          *http.Server
+@@ -62,7 +77,7 @@
+ 		cfg: cfg,
+ 		upgrader: websocket.Upgrader{
+ 			HandshakeTimeout: writeTimeout,
+-			ReadBufferSize:   4096,
++			ReadBufferSize:   spikeReadBuf,
+ 			WriteBufferSize:  16 * 1024,
+ 			WriteBufferPool:  &sync.Pool{},
+ 			CheckOrigin:      func(*http.Request) bool { return true },
+@@ -218,7 +233,7 @@
+ 	writeJSON(w, http.StatusOK, m)
+ }
+ 
+-func (s *Server) admit(duringDrain bool, next http.HandlerFunc) http.HandlerFunc {
++func (s *Server) admit(duringDrain bool, next func(http.ResponseWriter, *http.Request) func()) http.HandlerFunc {
+ 	return func(w http.ResponseWriter, r *http.Request) {
+ 		ip := admission.ClientIP(r, s.cfg.TrustedProxies)
+ 		switch s.gate.Acquire(ip) {
+@@ -229,15 +244,28 @@
+ 			s.reject(w, http.StatusTooManyRequests, "client connection capacity reached")
+ 			return
+ 		}
+-		defer s.gate.Release(ip)
++		var cont func()
+ 		switch {
+ 		case !duringDrain && s.draining.Load():
+ 			s.reject(w, http.StatusServiceUnavailable, "draining")
+ 		case !s.limiter.Allow(ip, time.Now()):
+ 			s.reject(w, http.StatusTooManyRequests, "rate limited")
+ 		default:
+-			next(w, r)
++			cont = next(w, r)
+ 		}
++		if cont == nil {
++			s.gate.Release(ip)
++			return
++		}
++		if !spikeHandoff {
++			cont()
++			s.gate.Release(ip)
++			return
++		}
++		go func() {
++			defer s.gate.Release(ip)
++			cont()
++		}()
+ 	}
+ }
+ 
+--- a/internal/relay/pair.go	2026-10-19 09:48:31
++++ b/internal/relay/pair.go	2026-10-19 09:57:25
+@@ -38,7 +38,7 @@
+ 	refs      int
+ }
+ 
+-func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
++func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) func() {
+ 	id := r.URL.Query().Get("endpointId")
+ 	clientKey := admission.ClientKey(admission.ClientIP(r, s.cfg.TrustedProxies))
+ 	s.mu.Lock()
+@@ -46,17 +46,17 @@
+ 	if h == nil {
+ 		s.mu.Unlock()
+ 		s.reject(w, http.StatusNotFound, "endpoint not found")
+-		return
++		return nil
+ 	}
+ 	if h.clientSlots >= s.cfg.MaxClientsPerHost {
+ 		s.mu.Unlock()
+ 		s.reject(w, http.StatusServiceUnavailable, "client capacity reached")
+-		return
++		return nil
+ 	}
+ 	if h.clientCounts[clientKey] >= s.cfg.MaxClientsPerHostPerIP {
+ 		s.mu.Unlock()
+ 		s.reject(w, http.StatusTooManyRequests, "client capacity for host reached")
+-		return
++		return nil
+ 	}
+ 	p := &pair{
+ 		s:         s,
+@@ -76,12 +76,12 @@
+ 	s.pending++
+ 	p.timer = time.AfterFunc(s.cfg.PairTimeout, p.expire)
+ 	s.mu.Unlock()
+-	defer p.releaseSlot()
+ 
+ 	ws, ok := s.upgrade(w, r, int64(s.cfg.MaxMessageBytes))
+ 	if !ok {
+ 		p.close(closeMsg{websocket.CloseInternalServerErr, "upgrade failed"})
+-		return
++		p.releaseSlot()
++		return nil
+ 	}
+ 	cp := s.newPeer(ws, nil, &h.bytesOut)
+ 	s.mu.Lock()
+@@ -89,17 +89,21 @@
+ 		cause := p.cause
+ 		s.mu.Unlock()
+ 		s.closeNow(ws, cause)
+-		return
++		p.releaseSlot()
++		return nil
+ 	}
+ 	p.client = cp
+ 	p.announced = true
+ 	h.notify(map[string]string{"type": "incoming", "connectionId": p.id, "token": p.token})
+ 	s.mu.Unlock()
+ 
+-	cp.readData(p)
++	return func() {
++		defer p.releaseSlot()
++		cp.readData(p)
++	}
+ }
+ 
+-func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) {
++func (s *Server) handleAccept(w http.ResponseWriter, r *http.Request) func() {
+ 	q := r.URL.Query()
+ 	s.mu.Lock()
+ 	p := s.pairs[q.Get("connectionId")]
+@@ -109,23 +113,23 @@
+ 	if p == nil {
+ 		s.mu.Unlock()
+ 		s.reject(w, http.StatusNotFound, "connection not found")
+-		return
++		return nil
+ 	}
+ 	token := q.Get("token")
+ 	if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(p.token)) != 1 || p.state != pending || p.client == nil {
+ 		s.mu.Unlock()
+ 		s.reject(w, http.StatusForbidden, "invalid token")
+-		return
++		return nil
+ 	}
+ 	p.state = accepting
+ 	p.refs++
+ 	s.mu.Unlock()
+-	defer p.releaseSlot()
+ 
+ 	ws, ok := s.upgrade(w, r, int64(s.cfg.MaxMessageBytes))
+ 	if !ok {
+ 		p.close(closeMsg{websocket.CloseInternalServerErr, "host accept failed"})
+-		return
++		p.releaseSlot()
++		return nil
+ 	}
+ 	hp := s.newPeer(ws, nil, &p.host.bytesIn)
+ 	s.mu.Lock()
+@@ -133,7 +137,8 @@
+ 		cause := p.cause
+ 		s.mu.Unlock()
+ 		s.closeNow(ws, cause)
+-		return
++		p.releaseSlot()
++		return nil
+ 	}
+ 	p.state = active
+ 	p.timer.Stop()
+@@ -143,7 +148,10 @@
+ 	close(p.ready)
+ 	s.mu.Unlock()
+ 
+-	hp.readData(p)
++	return func() {
++		defer p.releaseSlot()
++		hp.readData(p)
++	}
+ }
+ 
+ func (p *pair) expire() {
+--- a/internal/relay/control.go	2026-10-19 09:48:31
++++ b/internal/relay/control.go	2026-10-19 09:57:25
+@@ -41,15 +41,15 @@
+ 	}
+ }
+ 
+-func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) {
++func (s *Server) handleControl(w http.ResponseWriter, r *http.Request) func() {
+ 	pub, ok := decodeB64(r.URL.Query().Get("publicKey"), ed25519.PublicKeySize)
+ 	if !ok {
+ 		s.reject(w, http.StatusBadRequest, "invalid publicKey")
+-		return
++		return nil
+ 	}
+ 	ws, ok := s.upgrade(w, r, controlReadLimit)
+ 	if !ok {
+-		return
++		return nil
+ 	}
+ 	id := endpointID(pub)
+ 	nonce := randomB64(32)
+@@ -57,13 +57,13 @@
+ 	_ = ws.SetWriteDeadline(time.Now().Add(writeTimeout))
+ 	if err := ws.WriteMessage(challenge.typ, challenge.data); err != nil {
+ 		s.forget(ws)
+-		return
++		return nil
+ 	}
+ 	_ = ws.SetReadDeadline(time.Now().Add(s.cfg.AuthTimeout))
+ 	if !verifyAuth(ws, pub, id+"\n"+nonce) {
+ 		s.countRejection("authentication failed")
+ 		s.closeNow(ws, closeMsg{websocket.ClosePolicyViolation, "authentication failed"})
+-		return
++		return nil
+ 	}
+ 
+ 	ctrl := s.newPeer(ws, newQueue(maxQueueBytes, maxQueueMessages), nil)
+@@ -73,7 +73,7 @@
+ 	if s.draining.Load() {
+ 		s.mu.Unlock()
+ 		s.closeNow(ws, closeMsg{websocket.CloseGoingAway, "relay draining"})
+-		return
++		return nil
+ 	}
+ 	old := s.hosts[id]
+ 	s.hosts[id] = h
+@@ -83,10 +83,12 @@
+ 		old.ctrl.q.finish(closeMsg{closeSuperseded, "registration superseded"}, true)
+ 	}
+ 
+-	go ctrl.writeLoop()
+-	defer func() { <-ctrl.written }()
+-	ctrl.readControl()
+-	s.removeHost(h)
++	return func() {
++		go ctrl.writeLoop()
++		defer func() { <-ctrl.written }()
++		ctrl.readControl()
++		s.removeHost(h)
++	}
+ }
+ 
+ func verifyAuth(ws *websocket.Conn, pub ed25519.PublicKey, challenge string) bool {
+--- a/internal/relay/peer.go	2026-10-19 09:48:31
++++ b/internal/relay/peer.go	2026-10-19 09:57:25
+@@ -4,6 +4,7 @@
+ 	"errors"
+ 	"io"
+ 	"net"
++	"sync"
+ 	"sync/atomic"
+ 	"time"
+ 
+@@ -19,6 +20,9 @@
+ 	dead         chan struct{}
+ 	written      chan struct{}
+ 	cause        atomic.Pointer[closeMsg]
++	pingMu       sync.Mutex
++	pinger       *time.Timer
++	pingStopped  bool
+ }
+ 
+ func (s *Server) newPeer(ws *websocket.Conn, q *queue, traffic *atomic.Int64) *peer {
+@@ -119,9 +123,15 @@
+ // writer buffer. A stalled writer stops its source; no payload queue is kept.
+ func (p *peer) readData(pr *pair) {
+ 	defer p.s.forget(p.ws)
+-	defer func() { <-p.written }()
+-	defer p.exit()
+-	go p.keepAlive()
++	if spikePingTimer {
++		defer p.stopPings()
++		defer p.exit()
++		p.pinger = time.AfterFunc(p.s.cfg.Heartbeat, p.tick)
++	} else {
++		defer func() { <-p.written }()
++		defer p.exit()
++		go p.keepAlive()
++	}
+ 	select {
+ 	case <-pr.ready:
+ 	case <-pr.done:
+@@ -188,6 +198,24 @@
+ 	return n, err
+ }
+ 
++func (p *peer) tick() {
++	p.pingMu.Lock()
++	defer p.pingMu.Unlock()
++	if p.pingStopped {
++		return
++	}
++	if p.ping() {
++		p.pinger.Reset(p.s.cfg.Heartbeat)
++	}
++}
++
++func (p *peer) stopPings() {
++	p.pingMu.Lock()
++	p.pingStopped = true
++	p.pinger.Stop()
++	p.pingMu.Unlock()
++}
++
+ func (p *peer) keepAlive() {
+ 	defer close(p.written)
+ 	ticker := time.NewTicker(p.s.cfg.Heartbeat)
