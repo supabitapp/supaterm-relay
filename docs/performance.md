@@ -51,36 +51,38 @@ These mixed changes on a shared workstation do **not** establish a steady-state 
 
 ## Idle socket memory
 
-An idle paired user, one host control socket and two data sockets, holds about 38 KB of relay memory. At the fixed ceiling of 50,000 protocol connections that projects to about 640 MiB of resident memory, inside the 2 GiB Go memory target of the [production service](configuration.md).
+An idle paired user, one host control socket and two data sockets, holds about 38 KB of relay memory. At the fixed ceiling of 50,000 protocol connections that projects to about 630 MiB of resident memory, inside the 2 GiB Go memory target of the [production service](configuration.md).
 
 Three choices keep an idle socket small:
 
 - Each upgraded socket runs in a goroutine started after the upgrade, and the HTTP handler returns. `net/http` then frees the request's reader and writer buffers and the handler's stack. The goroutine holds the connection's admission slot until the socket closes and logs a panic without the peer, as the HTTP handlers do.
-- Gorilla reads through a 1 KiB buffer. Payload reads at least that large bypass it and land in the destination's pooled 16 KiB writer buffer, so its size mainly affects frame headers and small messages.
+- Gorilla reads through a 1 KiB buffer. Payload reads at least that large bypass it and land in the destination's pooled 16 KiB writer buffer.
 - Data sockets ping from a timer instead of a goroutine. Control sockets keep a reader and a writer goroutine.
 
-Measured on Linux in Docker (arm64, 4 CPUs, Go 1.27.2, `GOMEMLIMIT=2GiB`) with 15,000 idle users, 20 seconds after setup and after two forced garbage collections. "Before" is `main` at `e652282`.
+Measured on Linux in Docker (arm64, 4 CPUs, Go 1.27.2, `GOMEMLIMIT=2GiB`) with 15,000 idle users, 20 seconds after setup and after two forced garbage collections. "Before" is `main` at `e652282` and "after" is `23d0db8`.
 
 | Measure | Paired users, before | Paired users, after | Hosts only, before | Hosts only, after |
 | --- | ---: | ---: | ---: | ---: |
-| Resident memory for 15,000 users | 1,512 MiB | 580 MiB | 604 MiB | 249 MiB |
-| Resident memory per socket | 34.1 KB | 12.8 KB | 40.3 KB | 15.9 KB |
-| Live heap per socket | 17.8 KB | 3.7 KB | 17.8 KB | 4.3 KB |
+| Resident memory for 15,000 users | 1,512 MiB | 565 MiB | 604 MiB | 252 MiB |
+| Resident memory per socket | 34.1 KB | 12.6 KB | 40.3 KB | 16.1 KB |
+| Live heap per socket | 17.8 KB | 3.6 KB | 17.8 KB | 4.2 KB |
 | Goroutine stack per socket | 14.7 KB | 5.4 KB | 20.0 KB | 8.0 KB |
 | Goroutines per socket | 2 | 1.33 | 2 | 2 |
 
-Echo throughput in the same container stayed within run-to-run spread: four hosts, four messages in flight per client, a 2 s warmup and a 5 s window, two runs per build, and no failed or corrupt messages. Two runs of one build differed by up to 18%, for example 107,529 and 127,246 msg/s for 64 B with one client before the change.
+The smaller read buffer costs throughput when messages arrive back to back. A 1 KiB message and its frame header no longer fit one buffer fill, so each takes two reads; 1 KiB echo throughput fell by 7 to 17%. 64 B and 64 KiB echo throughput moved by 7% or less, within the spread between runs of one build. A 4 KiB buffer removes most of the 1 KiB cost for about 3 KB more per socket. The echo check used four hosts, four messages in flight per client, a 2 s warmup and a 5 s window, three alternating runs per build, and had no failed or corrupt messages. Values are means, with the run range in parentheses.
 
 | Payload | Clients | Before msg/s | After msg/s |
 | --- | ---: | ---: | ---: |
-| 64 B | 1 | 117,388 | 127,091 |
-| 64 B | 32 | 273,262 | 275,683 |
-| 1 KiB | 1 | 119,814 | 113,106 |
-| 1 KiB | 32 | 220,903 | 219,364 |
-| 64 KiB | 1 | 10,928 | 10,118 |
-| 64 KiB | 32 | 13,480 | 13,136 |
+| 64 B | 1 | 119,699 (108,423-126,144) | 127,319 (125,853-128,181) |
+| 64 B | 32 | 272,838 (271,420-275,090) | 263,887 (252,591-276,760) |
+| 1 KiB | 1 | 120,054 (118,578-122,395) | 100,078 (83,667-109,168) |
+| 1 KiB | 32 | 226,422 (225,507-227,526) | 210,168 (196,649-219,716) |
+| 64 KiB | 1 | 10,904 (10,248-11,257) | 10,163 (8,973-10,881) |
+| 64 KiB | 32 | 13,769 (13,668-13,885) | 13,215 (12,870-13,614) |
 
-Waiting on idle sockets with epoll instead of a goroutine was measured and not adopted. In a standalone gobwas/ws forwarder, epoll lowered idle resident memory from 4.7 KB to 2.1 KB per socket, but cut small-message echo throughput by 14 to 40% and added about 20 µs of median latency. It also needs Linux-only code and a frame parser in place of Gorilla, and a client that sends part of a frame header holds a goroutine and a read buffer until its read deadline. The measurement harness and raw samples are under `spike/` at commit `c647a3d`.
+Waiting on idle sockets with epoll instead of a goroutine was measured and not adopted. In a standalone gobwas/ws forwarder, epoll lowered idle resident memory from 4.7 KB to 2.1 KB per socket, but cut small-message echo throughput by 14 to 40% and added about 20 µs of median latency. It also needs Linux-only code and a frame parser in place of Gorilla, and a client that sends part of a frame header holds a goroutine and a read buffer until its read deadline.
+
+The harness is under `spike/` at commit `8d9264a`. The samples behind both tables are in `spike/results/pr`; the read-buffer and epoll comparisons are in `spike/results`.
 
 ## Should we use encoding/json/v2?
 
