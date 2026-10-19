@@ -10,6 +10,4 @@ Code changes pushed to `main` run [the deployment workflow](../.github/workflows
 
 The [installer](../deploy/install-relay.sh) installs the binary and unit, restarts the service, and enables it once the private health check passes.
 
-The former backend VMs (`supacode-relay-node-a`, `-b`, and `-c`) and the `relay-node-a`, `relay-node-b`, `relay-node-c`, and `relay-directory` integrations are outside the standalone deployment. Retire these account resources after the public smoke checks pass and clients reconnect. The workflow accesses only the public relay VM, so subsequent deployments do not depend on the former nodes.
-
-The [retained performance measurements](multi-node.md#public-tls-colocation-measurements) motivate avoiding the outbound integration path. They measure colocation with the router still present, and do not establish throughput for the standalone release or its maximum capacity. A single relay also has one failure domain; this deployment does not implement automatic failover.
+A single relay has one failure domain; this deployment does not implement automatic failover.
