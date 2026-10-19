@@ -1,0 +1,2 @@
+{"users":0,"sockets":0,"rssKiB":14032,"heapAllocBytes":1182544,"heapInuseBytes":1966080,"stackInuseBytes":688128,"runtimeSysBytes":9279752,"goroutines":9,"openSockets":0}
+{"users":15000,"sockets":15000,"rssKiB":618156,"heapAllocBytes":274111864,"heapInuseBytes":289488896,"stackInuseBytes":307920896,"runtimeSysBytes":636363160,"goroutines":30009,"openSockets":15000}
