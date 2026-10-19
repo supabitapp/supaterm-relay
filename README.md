@@ -43,7 +43,6 @@ Run one relay behind the TLS proxy. Hosts register and clients connect to that s
 - [Protocol](docs/protocol.md)
 - [Configuration](docs/configuration.md)
 - [Deployment](docs/deployment.md)
-- [Performance tuning and JSON v2 evaluation](docs/performance.md)
 - [Development](docs/development.md)
 
 ## License
