@@ -219,7 +219,7 @@ func (s *Server) writeMetrics(w http.ResponseWriter, detailed bool) {
 	m["rateLimiterEntries"] = s.limiter.Size()
 	m["goroutines"] = runtime.NumGoroutine()
 	m["draining"] = s.draining.Load()
-	m["dataBufferBytesPerSocket"] = readBufferSize + writeBufferSize + batchBufferSize
+	m["dataBufferBytesPerSocket"] = readBufferSize + readBatchSize + writeBufferSize + batchBufferSize
 	writeJSON(w, http.StatusOK, m)
 }
 
@@ -345,6 +345,7 @@ func (s *Server) closeNow(ws *websocket.Conn, c closeMsg) {
 			break
 		}
 	}
+	ws.UnderlyingConn().(*batchConn).releaseRead()
 	s.forget(ws)
 }
 

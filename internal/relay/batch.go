@@ -6,20 +6,29 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-const batchBufferSize = 4096
+const (
+	batchBufferSize = 4096
+	readBatchSize   = 4096
+)
 
 var batchBuffers = sync.Pool{New: func() any {
 	return bufio.NewWriterSize(nil, batchBufferSize)
 }}
 
-// batchConn combines already-available WebSocket frames into socket writes.
-// Its reader flushes the opposite socket before requesting more input, so no
-// timer or additional message queue is needed to flush an idle stream.
+var readBuffers = sync.Pool{New: func() any {
+	return new([readBatchSize]byte)
+}}
+
+// batchConn combines already-available WebSocket frames into socket writes,
+// and already-available input into socket reads. Its reader flushes the
+// opposite socket before requesting more input, so no timer or additional
+// message queue is needed to flush an idle stream.
 type batchConn struct {
 	net.Conn
 	mu     sync.Mutex
@@ -31,6 +40,11 @@ type batchConn struct {
 	// Set and used only by the connection's reader after pairing.
 	flushBeforeRead *batchConn
 
+	// Used only by the connection's reader.
+	raw     syscall.RawConn
+	readBuf *[readBatchSize]byte
+	unread  []byte
+
 	deadlineMu    sync.Mutex
 	deadline      time.Time
 	writing       bool
@@ -39,7 +53,7 @@ type batchConn struct {
 }
 
 func newBatchConn(conn net.Conn) *batchConn {
-	c := &batchConn{Conn: conn}
+	c := &batchConn{Conn: conn, raw: rawConn(conn)}
 	c.writer.conn = c
 	return c
 }
@@ -108,10 +122,32 @@ func (c *batchConn) flushOutput() error {
 }
 
 func (c *batchConn) Read(b []byte) (int, error) {
-	if err := c.flushOutput(); err != nil {
-		return 0, err
+	if len(c.unread) == 0 {
+		if err := c.flushOutput(); err != nil {
+			return 0, err
+		}
+		if c.raw == nil || len(b) >= readBatchSize {
+			return c.Conn.Read(b)
+		}
+		if err := c.fill(); err != nil {
+			return 0, err
+		}
 	}
-	return c.Conn.Read(b)
+	n := copy(b, c.unread)
+	c.unread = c.unread[n:]
+	if len(c.unread) == 0 {
+		c.releaseRead()
+	}
+	return n, nil
+}
+
+// Close runs concurrently with the reader, so the reader returns its buffer
+// when it stops.
+func (c *batchConn) releaseRead() {
+	if c.readBuf != nil {
+		readBuffers.Put(c.readBuf)
+		c.readBuf, c.unread = nil, nil
+	}
 }
 
 // Control frames may already be in Gorilla's read buffer. Flush preceding data

@@ -202,7 +202,7 @@ func TestMetricsIncludeBatchBufferCapacity(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &metrics); err != nil {
 		t.Fatal(err)
 	}
-	want := s.upgrader.ReadBufferSize + s.upgrader.WriteBufferSize + batchBufferSize
+	want := s.upgrader.ReadBufferSize + readBatchSize + s.upgrader.WriteBufferSize + batchBufferSize
 	if metrics.DataBufferBytesPerSocket != want {
 		t.Fatalf("buffer capacity = %d, want %d", metrics.DataBufferBytesPerSocket, want)
 	}

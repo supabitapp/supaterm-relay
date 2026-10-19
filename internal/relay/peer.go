@@ -108,6 +108,7 @@ func (p *peer) writeLoop() {
 
 func (p *peer) readControl() {
 	defer p.exit()
+	defer p.ws.UnderlyingConn().(*batchConn).releaseRead()
 	for {
 		if _, _, err := p.ws.ReadMessage(); err != nil {
 			return
@@ -136,6 +137,7 @@ func (p *peer) readData(pr *pair) {
 	}
 	p.s.mu.Unlock()
 	input := p.ws.UnderlyingConn().(*batchConn)
+	defer input.releaseRead()
 	output := out.ws.UnderlyingConn().(*batchConn)
 	output.enable()
 	input.flushBeforeRead = output
