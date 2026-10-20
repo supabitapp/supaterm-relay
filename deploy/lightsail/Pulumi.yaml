@@ -59,6 +59,7 @@ resources:
           ipv6Cidrs: ["::/0"]
     options:
       provider: ${aws}
+      deleteBeforeReplace: true
   relayIp:
     type: aws:lightsail:StaticIp
     options:

@@ -32,10 +32,11 @@ The job needs these settings in the `relay2` GitHub environment:
 | `PULUMI_ACCESS_TOKEN` | Secret | Pulumi Cloud token. The first deployment creates the `relay2` stack in the token's default organization |
 | `CLOUDFLARE_API_TOKEN` | Secret | Cloudflare token with Zone Read and DNS Edit on `supaterm.com` |
 
-Create them with administrator AWS credentials. Skip `create-open-id-connect-provider` if the account already trusts GitHub's OIDC provider.
+Create them with administrator AWS credentials. Skip `create-open-id-connect-provider` if the account already trusts GitHub's OIDC provider. The repository uses GitHub's immutable OIDC subjects, which identify the owner and repository by ID, so the trust policy reads the subject prefix from GitHub instead of spelling out the repository name.
 
 ```sh
 account=$(aws sts get-caller-identity --query Account --output text)
+subject=$(gh api repos/supabitapp/supaterm-relay/actions/oidc/customization/sub --jq .sub_claim_prefix):environment:relay2
 aws iam create-open-id-connect-provider --url https://token.actions.githubusercontent.com --client-id-list sts.amazonaws.com
 aws iam create-role --role-name supaterm-relay-deploy --assume-role-policy-document "$(cat <<EOF
 {
@@ -46,7 +47,7 @@ aws iam create-role --role-name supaterm-relay-deploy --assume-role-policy-docum
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {"StringEquals": {
       "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-      "token.actions.githubusercontent.com:sub": "repo:supabitapp/supaterm-relay:environment:relay2"
+      "token.actions.githubusercontent.com:sub": "$subject"
     }}
   }]
 }

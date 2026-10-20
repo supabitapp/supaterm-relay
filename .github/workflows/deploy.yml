@@ -110,9 +110,9 @@ jobs:
         env:
           RELAY_HOSTNAME: ${{ steps.pulumi.outputs.hostname }}
         run: |
-          scp bin/relay deploy/supaterm-relay.service relay:/tmp/
-          ssh relay bash -s -- "$RELAY_HOSTNAME" < deploy/lightsail/install-caddy.sh
-          ssh relay bash -s < deploy/install-relay.sh
+          scp bin/relay deploy/supaterm-relay.service deploy/install-relay.sh deploy/lightsail/install-caddy.sh relay:/tmp/
+          # shellcheck disable=SC2029
+          ssh relay "bash /tmp/install-caddy.sh $RELAY_HOSTNAME && bash /tmp/install-relay.sh"
       - name: Smoke test through the public endpoint
         env:
           RELAY_HOSTNAME: ${{ steps.pulumi.outputs.hostname }}
