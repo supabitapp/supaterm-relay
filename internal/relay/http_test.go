@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,6 +88,38 @@ func TestHTTPTimeoutsDoNotExpireWebSockets(t *testing.T) {
 	}
 	if err := client.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestProtocolServesUnderAnyPathPrefix(t *testing.T) {
+	cfg, err := LoadConfig(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(cfg)
+	listener := httptest.NewServer(s.http.Handler)
+	t.Cleanup(listener.Close)
+	t.Cleanup(func() { closeLifecycleSockets(s) })
+	base := "ws" + strings.TrimPrefix(listener.URL, "http")
+	for _, prefix := range []string{"", "/tunnel", "/relay/v2", "/dashboard", "/a/../b", "/tun%2Fnel"} {
+		h := registerHost(t, base+prefix)
+		client, host := openPair(t, h)
+		expectPairMessage(t, client, host)
+	}
+	h := registerHost(t, base+"/tunnel")
+	h.Base = base
+	client, host := openPair(t, h)
+	expectPairMessage(t, client, host)
+
+	for _, path := range []string{"/tunnel/v1/other", "/tunnelv1/connect", "/tunnel/metrics", "/tunnel/healthz", "/tunnel/dashboard/"} {
+		resp, err := http.Get(listener.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s: %s, want 404", path, resp.Status)
+		}
 	}
 }
 

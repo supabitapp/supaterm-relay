@@ -90,9 +90,27 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /v1/connect", s.admit(false, s.handleConnect))
 	mux.HandleFunc("GET /v1/accept", s.admit(true, s.handleAccept))
 	mux.Handle("GET /dashboard/", http.StripPrefix("/dashboard", dashboard.New(s.dashboardStats, s.limitPublic)))
-	s.http = newHTTPServer(mux)
+	s.http = newHTTPServer(protocolUnderAnyPrefix(mux))
 	s.private = newHTTPServer(admin)
 	return s
+}
+
+var protocolPaths = []string{"/v1/control", "/v1/connect", "/v1/accept"}
+
+func protocolUnderAnyPrefix(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, path := range protocolPaths {
+			if len(r.URL.Path) > len(path) && strings.HasSuffix(r.URL.Path, path) {
+				unprefixed := *r
+				u := *r.URL
+				u.Path, u.RawPath = path, ""
+				unprefixed.URL = &u
+				next.ServeHTTP(w, &unprefixed)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func newHTTPServer(handler http.Handler) *http.Server {
