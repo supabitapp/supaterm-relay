@@ -1,4 +1,4 @@
-.PHONY: build run test check test-race audit e2e-docker bench bench-docker
+.PHONY: build run test check test-race audit e2e-docker interop bench bench-docker
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/relay ./cmd/relay
@@ -13,8 +13,10 @@ check:
 	go mod tidy -diff
 	go vet ./...
 	go vet -tags dockere2e ./e2e/docker
+	go vet -tags supaterminterop ./e2e/interop
 	go fix -diff ./...
 	go fix -diff -tags dockere2e ./e2e/docker
+	go fix -diff -tags supaterminterop ./e2e/interop
 
 test-race:
 	go test -race -count=1 -shuffle=on ./...
@@ -24,6 +26,10 @@ audit:
 
 e2e-docker:
 	./e2e/docker/run.sh
+
+interop:
+	@test -n "$$SUPATERM_DIR" || { echo "set SUPATERM_DIR to a Supaterm checkout with installed dependencies" >&2; exit 1; }
+	go test -tags supaterminterop -count=1 -v ./e2e/interop
 
 bench: build
 	go run ./e2e/bench -spawn -relay-bin bin/relay

@@ -54,3 +54,4 @@ jobs:
         run: |
           go run ./e2e/docker/probe -mode smoke -url "$PUBLIC_RELAY_URL" -n 6
           go run ./e2e/docker/probe -mode smoke -url "wss://$RELAY_HOST" -n 6
+          go run ./e2e/docker/probe -mode tunnel -url "$PUBLIC_RELAY_URL" -n 4
