@@ -21,7 +21,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		MaxMessageBytes:        (32 << 20) - 14,
 		MaxClientsPerHost:      64,
 		MaxClientsPerHostPerIP: 16,
-		MaxConnectionsPerIP:    512,
+		MaxConnectionsPerIP:    128,
 		AuthTimeout:            5 * time.Second,
 		PairTimeout:            5 * time.Second,
 		DeliveryTimeout:        30 * time.Second,

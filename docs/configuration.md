@@ -6,7 +6,7 @@
 | `RELAY_MAX_MESSAGE_BYTES` | `33554418` | Largest single message |
 | `RELAY_MAX_CLIENTS_PER_HOST` | `64` | Pairs per host. Matches the Supaterm host's 64-pair cap; excess connections receive HTTP 503 |
 | `RELAY_MAX_CLIENTS_PER_HOST_PER_IP` | `16` | Pairs per host from one client network, including pending, active and closing pairs. Excess connections receive HTTP 429 |
-| `RELAY_MAX_CONNS_PER_IP` | `512` | Concurrent protocol connections per client network |
+| `RELAY_MAX_CONNS_PER_IP` | `128` | Concurrent protocol connections per client network |
 | `RELAY_AUTH_TIMEOUT_MS` | `5000` | Time to answer the challenge |
 | `RELAY_PAIR_TIMEOUT_MS` | `5000` | Time for the host to complete accepting a client |
 | `RELAY_DELIVERY_TIMEOUT_MS` | `30000` | How long a write to a pair's receiver may stay blocked before the receiver is closed |
@@ -21,4 +21,4 @@ Client quotas use one IPv4 address or one IPv6 `/64` prefix. IPv4-mapped IPv6 ad
 
 Each host's control queue holds at most 256 notifications or 64 KiB; a host that falls further behind is closed with 1013. Control and close writes time out after 5 seconds. These limits are fixed.
 
-The relay accepts at most 50,000 protocol connections in total, including authentication and pairing; further connections receive HTTP 503 while existing sessions continue. This ceiling is fixed. It has no separate limit on hosts or pairs. The [production service](../deploy/supaterm-relay.service) runs on a 4 GiB machine, allows 1,500 connections per client network, sets a 2 GiB soft Go memory target, and caps the service at 3 GiB of memory and 131,072 open files.
+The relay accepts at most 50,000 protocol connections in total, including authentication and pairing; further connections receive HTTP 503 while existing sessions continue. This ceiling is fixed. It has no separate limit on hosts or pairs. The [production service](../deploy/supaterm-relay.service) runs on a 4 GiB machine, sets a 2 GiB soft Go memory target, and caps the service at 3 GiB of memory and 131,072 open files.

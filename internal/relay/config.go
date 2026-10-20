@@ -55,7 +55,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		{"RELAY_MAX_MESSAGE_BYTES", (32 << 20) - 14, &c.MaxMessageBytes},
 		{"RELAY_MAX_CLIENTS_PER_HOST", 64, &c.MaxClientsPerHost},
 		{"RELAY_MAX_CLIENTS_PER_HOST_PER_IP", 16, &c.MaxClientsPerHostPerIP},
-		{"RELAY_MAX_CONNS_PER_IP", 512, &c.MaxConnectionsPerIP},
+		{"RELAY_MAX_CONNS_PER_IP", 128, &c.MaxConnectionsPerIP},
 	}
 	for _, f := range ints {
 		n, err := positiveInt(getenv, f.name, f.def)

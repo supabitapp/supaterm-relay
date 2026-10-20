@@ -39,7 +39,7 @@ func connectMany(t *testing.T, r *relay, address string, n int) []*supaterm.Clie
 
 func TestSupatermHostServesItsSixtyFourPairCap(t *testing.T) {
 	t.Parallel()
-	r := startRelay(t, "RELAY_MAX_CLIENTS_PER_HOST_PER_IP=64")
+	r := startRelay(t, "RELAY_MAX_CLIENTS_PER_HOST_PER_IP=64", "RELAY_MAX_CONNS_PER_IP=256")
 	h := startSupatermHost(t, r, "busy")
 	clients := connectMany(t, r, h.Address(), supaterm.MaxHostPairs)
 	if m := r.metrics(); m["activePairs"] != supaterm.MaxHostPairs {
@@ -86,7 +86,7 @@ func TestSupatermPerNetworkQuotaReportsRelayBusy(t *testing.T) {
 
 func TestSupatermHostAtCapacityLeavesExtraClientsHostOffline(t *testing.T) {
 	t.Parallel()
-	r := startRelay(t, "RELAY_MAX_CLIENTS_PER_HOST=80", "RELAY_MAX_CLIENTS_PER_HOST_PER_IP=80", "RELAY_PAIR_TIMEOUT_MS=300")
+	r := startRelay(t, "RELAY_MAX_CLIENTS_PER_HOST=80", "RELAY_MAX_CLIENTS_PER_HOST_PER_IP=80", "RELAY_MAX_CONNS_PER_IP=256", "RELAY_PAIR_TIMEOUT_MS=300")
 	h := startSupatermHost(t, r, "ignoring")
 	connectMany(t, r, h.Address(), supaterm.MaxHostPairs)
 	ce := expectFailure(t, r, h.Address(), supaterm.FailureHostOffline, http.StatusSwitchingProtocols)
