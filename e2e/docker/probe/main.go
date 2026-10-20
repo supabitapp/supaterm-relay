@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -15,11 +17,12 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/supabitapp/supaterm-relay/e2e/supaterm"
 	"github.com/supabitapp/supaterm-relay/internal/endpoint"
 )
 
 func main() {
-	mode := flag.String("mode", "http", "http, control, connect, or smoke")
+	mode := flag.String("mode", "http", "http, control, connect, smoke, or tunnel")
 	target := flag.String("url", "", "URL for http mode, ws base for control and connect")
 	n := flag.Int("n", 1, "attempts")
 	xff := flag.String("xff", "", "spoofed X-Forwarded-For, X-Real-IP, and Forwarded value")
@@ -28,6 +31,14 @@ func main() {
 
 	out := map[string]any{"mode": *mode}
 	switch *mode {
+	case "tunnel":
+		rounds, err := tunnel(*target, *n)
+		out["roundsVerified"] = rounds
+		if err != nil {
+			out["error"] = err.Error()
+			_ = json.NewEncoder(os.Stdout).Encode(out)
+			os.Exit(1)
+		}
 	case "smoke":
 		pairs, err := smoke(*target, *n)
 		out["pairsVerified"] = pairs
@@ -141,4 +152,59 @@ func smokePair(base string, h *endpoint.Host) error {
 		}
 	}
 	return nil
+}
+
+func tunnel(base string, rounds int) (int, error) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	h := supaterm.StartHost(supaterm.HostConfig{Identity: priv, RelayURL: base})
+	defer h.Stop()
+	srv := &http.Server{Handler: supaterm.FixtureHandler("smoke")}
+	go func() { _ = srv.Serve(h) }()
+	defer srv.Close()
+	if !h.WaitStatus(supaterm.StatusRegistered, 15*time.Second) {
+		return 0, fmt.Errorf("host did not register: %v %v", h.Statuses(), h.Violations())
+	}
+	c := supaterm.NewConnector(supaterm.ClientConfig{RelayURL: base, Address: h.Address()})
+	defer c.Close()
+	client := c.HTTPClient()
+	client.Timeout = 30 * time.Second
+	verified := 0
+	for i := range rounds {
+		size := 1<<20 + i
+		resp, err := client.Get(fmt.Sprintf("http://supaterm.test/api/test/bytes/%d", size))
+		if err != nil {
+			return verified, fmt.Errorf("round %d: %w", i, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil || !bytes.Equal(body, supaterm.Pattern(0, size)) {
+			return verified, fmt.Errorf("round %d: %d bytes, %v", i, len(body), err)
+		}
+		verified++
+	}
+	ws, _, err := (&websocket.Dialer{NetDialContext: c.DialContext}).Dial("ws://supaterm.test/ws", nil)
+	if err != nil {
+		return verified, fmt.Errorf("inner websocket: %w", err)
+	}
+	defer ws.Close()
+	payload := make([]byte, 64<<10)
+	_, _ = rand.Read(payload)
+	_ = ws.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if err := ws.WriteMessage(websocket.BinaryMessage, payload); err != nil {
+		return verified, err
+	}
+	if _, got, err := ws.ReadMessage(); err != nil || !bytes.Equal(got, payload) {
+		return verified, fmt.Errorf("inner websocket echo: %v", err)
+	}
+	s, err := c.Session(context.Background())
+	if err != nil {
+		return verified, err
+	}
+	if _, err := s.Ping(2 * time.Second); err != nil {
+		return verified, fmt.Errorf("encrypted probe: %w", err)
+	}
+	if v := h.Violations(); len(v) > 0 {
+		return verified, fmt.Errorf("relay protocol violations: %q", v)
+	}
+	return verified, nil
 }

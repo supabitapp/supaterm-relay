@@ -30,3 +30,54 @@ jobs:
         with:
           go-version: stable
       - run: make audit
+
+  interop:
+    name: interop (Supaterm ${{ matrix.channel }})
+    runs-on: depot-ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [release, nightly]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Resolve the latest Supaterm ${{ matrix.channel }}
+        id: supaterm
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ matrix.channel }}
+        run: |
+          if [ "$CHANNEL" = release ]; then
+            tag=$(gh api repos/supabitapp/supaterm/releases/latest --jq .tag_name)
+          else
+            tag=$(gh release list --repo supabitapp/supaterm --limit 100 --exclude-drafts --json tagName \
+              --jq '[.[].tagName | select(test("^v[0-9.]+-nightly\\.[0-9]+\\.[0-9]+$"))][0] // empty')
+          fi
+          test -n "$tag"
+          echo "ref=$tag" >> "$GITHUB_OUTPUT"
+          echo "Testing against Supaterm $tag" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v7
+        with:
+          repository: supabitapp/supaterm
+          ref: ${{ steps.supaterm.outputs.ref }}
+          path: supaterm
+          persist-credentials: false
+      - name: Read Supaterm's Node version
+        id: node
+        run: echo "version=$(sed -n 's/^node = "\(.*\)"$/\1/p' supaterm/mise.toml)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: supaterm/package.json
+          cache: true
+          cache_dependency_path: supaterm/pnpm-lock.yaml
+      - name: Install Supaterm's relay dependencies
+        working-directory: supaterm
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter ./apps/server... --filter ./packages/shared...
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: make interop
+        env:
+          SUPATERM_DIR: ${{ github.workspace }}/supaterm

@@ -40,7 +40,7 @@ Treat `connectionId` as opaque. The relay generates a random unpadded Base64URL 
 
 ## HTTP
 
-Protocol requests receive HTTP 429 when a [client network quota](configuration.md) is reached, or HTTP 503 when the relay holds 50,000 protocol connections, the host already has `RELAY_MAX_CLIENTS_PER_HOST` pairs, or the relay is draining. These checks run before the WebSocket upgrade. The per-host client quota counts a pair until both sides finish cleanup.
+A client connecting to an endpoint with no registered host receives HTTP 404, which Supaterm reports as the host being offline. Protocol requests receive HTTP 429 when a [client network quota](configuration.md) is reached, or HTTP 503 when the relay holds 50,000 protocol connections, the host already has `RELAY_MAX_CLIENTS_PER_HOST` pairs, or the relay is draining. These checks run before the WebSocket upgrade. The per-host client quota counts a pair until both sides finish cleanup.
 
 `GET /healthz` returns 200, or 503 while shutting down. `GET /metrics` returns JSON counters, including active and closing admission slots, configured data-buffer capacity, Go heap and allocation counters, and `topHosts`. `topHosts` lists the 20 hosts on the relay that have relayed the most bytes since they registered, with the first 16 hex characters of each endpoint ID, bytes relayed to and from the host, and open pairs. When `RELAY_PRIVATE_ADDR` is set, health and detailed metrics use that listener. The public `/metrics` response retains aggregate counters and excludes `topHosts`. `relay healthcheck` and `relay metrics` query them locally.
 
