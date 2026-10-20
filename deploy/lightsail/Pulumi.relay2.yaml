@@ -1,0 +1,4 @@
+config:
+  supaterm-relay:hostname: relay2.supaterm.com
+  supaterm-relay:zone: supaterm.com
+  supaterm-relay:region: eu-west-2

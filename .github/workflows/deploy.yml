@@ -55,3 +55,68 @@ jobs:
           go run ./e2e/docker/probe -mode smoke -url "$PUBLIC_RELAY_URL" -n 6
           go run ./e2e/docker/probe -mode smoke -url "wss://$RELAY_HOST" -n 6
           go run ./e2e/docker/probe -mode tunnel -url "$PUBLIC_RELAY_URL" -n 4
+
+  relay2:
+    needs: ci
+    runs-on: depot-ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: relay2
+      url: https://${{ steps.pulumi.outputs.hostname }}/
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: make build
+        env:
+          GOOS: linux
+          GOARCH: amd64
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: eu-west-2
+      - id: pulumi
+        uses: pulumi/actions@v7
+        with:
+          command: up
+          stack-name: relay2
+          work-dir: deploy/lightsail
+          pulumi-version: 3.270.0
+          upsert: true
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Configure SSH
+        env:
+          INSTANCE: ${{ steps.pulumi.outputs.instanceName }}
+          REGION: ${{ steps.pulumi.outputs.region }}
+        run: |
+          install -m 700 -d ~/.ssh
+          for _ in $(seq 60); do
+            if details=$(aws lightsail get-instance-access-details --region "$REGION" --instance-name "$INSTANCE" --protocol ssh --query accessDetails); then
+              (umask 077; jq -r .privateKey <<<"$details" > ~/.ssh/lightsail)
+              jq -r .certKey <<<"$details" > ~/.ssh/lightsail-cert.pub
+              jq -r '.ipAddress as $ip | .hostKeys[] | "\($ip) \(.algorithm) \(.publicKey)"' <<<"$details" > ~/.ssh/known_hosts
+              jq -r '"Host relay\n  HostName \(.ipAddress)\n  User \(.username)\n  IdentityFile ~/.ssh/lightsail\n  BatchMode yes\n  ConnectTimeout 10"' <<<"$details" > ~/.ssh/config
+              ssh relay true && exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+      - name: Install relay
+        env:
+          RELAY_HOSTNAME: ${{ steps.pulumi.outputs.hostname }}
+        run: |
+          scp bin/relay deploy/supaterm-relay.service relay:/tmp/
+          ssh relay bash -s -- "$RELAY_HOSTNAME" < deploy/lightsail/install-caddy.sh
+          ssh relay bash -s < deploy/install-relay.sh
+      - name: Smoke test through the public endpoint
+        env:
+          RELAY_HOSTNAME: ${{ steps.pulumi.outputs.hostname }}
+        run: |
+          curl -fsS --retry 30 --retry-delay 5 --retry-all-errors -o /dev/null "https://$RELAY_HOSTNAME/metrics"
+          go run ./e2e/docker/probe -mode smoke -url "wss://$RELAY_HOSTNAME" -n 6
+          go run ./e2e/docker/probe -mode tunnel -url "wss://$RELAY_HOSTNAME" -n 4

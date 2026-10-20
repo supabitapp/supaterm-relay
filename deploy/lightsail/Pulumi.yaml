@@ -1,0 +1,100 @@
+name: supaterm-relay
+description: A standalone Supaterm relay on an AWS Lightsail instance, behind Caddy
+runtime: yaml
+config:
+  hostname:
+    type: string
+  zone:
+    type: string
+  region:
+    type: string
+variables:
+  zoneId:
+    fn::invoke:
+      function: cloudflare:getZone
+      arguments:
+        filter:
+          name: ${zone}
+      options:
+        provider: ${cloudflare}
+      return: id
+resources:
+  aws:
+    type: pulumi:providers:aws
+    properties:
+      region: ${region}
+    options:
+      version: 7.51.1
+  cloudflare:
+    type: pulumi:providers:cloudflare
+    options:
+      version: 6.22.1
+  relay:
+    type: aws:lightsail:Instance
+    properties:
+      availabilityZone: ${region}a
+      blueprintId: ubuntu_24_04
+      bundleId: medium_3_0
+    options:
+      provider: ${aws}
+  publicPorts:
+    type: aws:lightsail:InstancePublicPorts
+    properties:
+      instanceName: ${relay.name}
+      portInfos:
+        - protocol: tcp
+          fromPort: 22
+          toPort: 22
+          cidrs: [0.0.0.0/0]
+          ipv6Cidrs: ["::/0"]
+        - protocol: tcp
+          fromPort: 80
+          toPort: 80
+          cidrs: [0.0.0.0/0]
+          ipv6Cidrs: ["::/0"]
+        - protocol: tcp
+          fromPort: 443
+          toPort: 443
+          cidrs: [0.0.0.0/0]
+          ipv6Cidrs: ["::/0"]
+    options:
+      provider: ${aws}
+  relayIp:
+    type: aws:lightsail:StaticIp
+    options:
+      provider: ${aws}
+  relayIpAttachment:
+    type: aws:lightsail:StaticIpAttachment
+    properties:
+      staticIpName: ${relayIp.name}
+      instanceName: ${relay.name}
+    options:
+      provider: ${aws}
+      deleteBeforeReplace: true
+  ipv4Record:
+    type: cloudflare:DnsRecord
+    properties:
+      zoneId: ${zoneId}
+      name: ${hostname}
+      type: A
+      content: ${relayIp.ipAddress}
+      ttl: 1
+      proxied: false
+    options:
+      provider: ${cloudflare}
+  ipv6Record:
+    type: cloudflare:DnsRecord
+    properties:
+      zoneId: ${zoneId}
+      name: ${hostname}
+      type: AAAA
+      content: ${relay.ipv6Addresses[0]}
+      ttl: 1
+      proxied: false
+    options:
+      provider: ${cloudflare}
+outputs:
+  hostname: ${hostname}
+  region: ${region}
+  instanceName: ${relay.name}
+  ipAddress: ${relayIp.ipAddress}
