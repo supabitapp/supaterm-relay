@@ -6,6 +6,8 @@
 4. The host opens `/v1/accept?endpointId=HEX&connectionId=ID&token=TOKEN`, and the two sockets are paired. A host may ignore `incoming`, for example when it is at capacity; the relay closes that client with 1013 after `RELAY_PAIR_TIMEOUT_MS`.
 5. When either side closes, the relay sends the host `{"type":"closed","connectionId":"ID"}`.
 
+The relay serves `/v1/control`, `/v1/connect` and `/v1/accept` at the root and under any path prefix, so a relay URL such as `wss://relay.example/tunnel` works behind a proxy that forwards the full path. Health, metrics and the dashboard stay at the root.
+
 Messages keep their order, boundaries, and text or binary type. Before acceptance the relay pauses application reads; early bytes wait in the socket buffers and arrive once the pair is ready.
 
 Each direction streams into a fixed WebSocket writer buffer. A pooled 4 KiB socket buffer combines already-available frames, flushing before reading more input and immediately for control frames. Reads take a second pooled 4 KiB buffer only when input is ready, so one read collects every frame that has arrived. A slow receiver stops its sender through TCP backpressure. The configured data-buffer capacity totals about 50 KiB per pair, plus framing, connection state, goroutine stacks and socket memory. Buffers do not grow with message size or elapsed traffic; idle sockets return their batch and read buffers to the pool. Pending, active and closing connections retain their admission slots until cleanup finishes.
