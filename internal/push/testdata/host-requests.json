@@ -1,0 +1,29 @@
+{
+  "host": {
+    "publicKey": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ"
+  },
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/v1/send",
+      "timestamp": 1791840001000,
+      "body": "{\"handle\":\"AQIDBAUGBwgJCgsMDQ4PEA\",\"payload\":{\"v\":1,\"registrationId\":\"6f1c2b9e-3a4d-4e5f-8a6b-7c8d9e0f1a2b\",\"keyId\":\"0b9f8e7d-6c5b-4a39-8281-7f6e5d4c3b2a\",\"notificationId\":\"11111111-1111-4111-8111-111111111111\",\"createdAt\":1791840000000,\"expiresAt\":1791926400000,\"enc\":\"-ki6w9xI69-8Bjar9pQ11NejEUcUqXFSwcGaf8aREUk\",\"ciphertext\":\"ooRxXDJphxT-0I6YKGsOrkjN45BayJ-H5KEyT6xmwYx79-fROTrWcOau1PRYF8CDj4OuK-Wvin3ENgrKHcRpLWphAAj6ie3HFviSxQvJ2m7-QCJp-SH6FkxYt0f9pI0PJ5QyfnWe03A-DTCCaRkkX7GXjTLhqxp_q4JLszDCWtMBHgnsqGyAeEXnEpIVon5qb67bvICHGL6NYoOHzE6m1kaW65i8QLB7VvO_NnJtMQa0g-XRXchhcBxcjrkNtz52GRFvuQMoy8ETp4xZt7wZL6rq5OOL5voIKEOERPUWmfZlwGK6DfwVDAmeDXCxSaSxDLpH0YNshWzmj4X2jTWkRhG0n5DrVf5tPXYHZbR3T7A\",\"signature\":\"zT9L0f0m0EIaR_aj_YI1Np7RQkHymjco4hVPI9vF77xTvqzjaR76wfedZsYJf_y01e9DKFBc9DyIlONpv7gABA\"},\"expiration\":1791926400,\"priority\":10,\"collapseId\":\"Zm9vYmFyYmF6cXV4cXV1eGNvcmdl\"}",
+      "headers": {
+        "supaterm-push-key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+        "supaterm-push-timestamp": "1791840001000",
+        "supaterm-push-signature": "I59AdhC8Q-FKdbs8vVgdSrk3sRt743l8IIVRwlTsoKiD6pmgWDaydy8BgaALrInOSyUHrp4EM5bMjwiu0X51Ag"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/handles/AQIDBAUGBwgJCgsMDQ4PEA",
+      "timestamp": 1791840002000,
+      "body": "",
+      "headers": {
+        "supaterm-push-key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+        "supaterm-push-timestamp": "1791840002000",
+        "supaterm-push-signature": "i9Eu3dVhjE8yF2DEIbZPeAibmtvn9nAxCU1bXqKmWbAjsvgjqpmmoLTjDqt2En-nB9rHQ0-XLRGghdxC9sG_Bw"
+      }
+    }
+  ]
+}
