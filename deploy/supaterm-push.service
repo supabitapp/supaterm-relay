@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 ExecStart=/usr/local/bin/supaterm-push
 EnvironmentFile=/etc/supaterm-push/push.env
+Environment=GOMEMLIMIT=192MiB
 Environment=PUSH_ADDR=127.0.0.1:8000
 Environment=PUSH_DATABASE=/var/lib/supaterm-push/push.sqlite
 Environment=APNS_SANDBOX_KEY_FILE=%d/apns-sandbox.p8

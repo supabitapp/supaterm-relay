@@ -65,11 +65,15 @@ Hosts may retry 502 and 503.
 
 | Scope | Limit |
 | --- | --- |
-| Enrollments per client network | 20 per hour |
-| Challenges per device token | 5 per hour |
+| Enrollments per client network | 20 per rolling hour |
+| Challenges per device token | 5 per rolling hour |
+| Handle mints and host deletions per installation | 30 per hour, burst 10 |
+| Handle mints and host deletions per client network | 120 per hour, burst 30 |
 | Sends per handle | 30 per minute, burst 10 |
 | Sends per host key | 600 per minute, burst 60 |
 | Sends per installation | 120 per minute, burst 20 |
+
+The replay cache holds at most 262,144 live signatures. While it is full, new signed requests answer 429 `rate_limited` instead of evicting signatures that could still be replayed.
 
 A client network is one IPv4 address or IPv6 `/64`. The gateway takes the client address from `X-Forwarded-For` only when the peer is loopback, which is the local HTTPS proxy in production.
 

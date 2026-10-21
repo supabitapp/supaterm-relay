@@ -56,11 +56,13 @@ type Server struct {
 	replays *replayCache
 	http    *http.Server
 
-	enrollmentsPerIP   *limiter
-	challengesPerToken *limiter
-	sendsPerHandle     *limiter
-	sendsPerHost       *limiter
-	sendsPerInstall    *limiter
+	enrollmentsPerIP        *window
+	challengesPerToken      *window
+	handleChangesPerIP      *limiter
+	handleChangesPerInstall *limiter
+	sendsPerHandle          *limiter
+	sendsPerHost            *limiter
+	sendsPerInstall         *limiter
 }
 
 func New(cfg Config, store *Store, client *http.Client, log *slog.Logger) *Server {
@@ -69,13 +71,15 @@ func New(cfg Config, store *Store, client *http.Client, log *slog.Logger) *Serve
 		log:     log,
 		now:     time.Now,
 		topics:  map[string]bool{},
-		replays: newReplayCache(),
+		replays: newReplayCache(maxReplayEntries),
 
-		enrollmentsPerIP:   newLimiter(20, time.Hour, 20),
-		challengesPerToken: newLimiter(5, time.Hour, 5),
-		sendsPerHandle:     newLimiter(30, time.Minute, 10),
-		sendsPerHost:       newLimiter(600, time.Minute, 60),
-		sendsPerInstall:    newLimiter(120, time.Minute, 20),
+		enrollmentsPerIP:        newWindow(20, time.Hour),
+		challengesPerToken:      newWindow(5, time.Hour),
+		handleChangesPerIP:      newLimiter(120, time.Hour, 30),
+		handleChangesPerInstall: newLimiter(30, time.Hour, 10),
+		sendsPerHandle:          newLimiter(30, time.Minute, 10),
+		sendsPerHost:            newLimiter(600, time.Minute, 60),
+		sendsPerInstall:         newLimiter(120, time.Minute, 20),
 	}
 	s.apns = newAPNsClient(client, cfg.TeamID, cfg.Credentials, func() time.Time { return s.now() })
 	for _, topic := range cfg.Topics {
@@ -355,6 +359,9 @@ func (s *Server) handleCreateHandle(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
+	if err := s.takeHandleChange(r, in.ID); err != nil {
+		return err
+	}
 	h := Handle{Handle: b64u.EncodeToString(randomBytes(16)), InstallationID: in.ID, HostKey: hostKey}
 	err = s.store.CreateHandle(r.Context(), h, maxHandles, s.now())
 	if errors.Is(err, ErrNotFound) {
@@ -476,6 +483,9 @@ func (s *Server) handleDeleteHostHandle(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return err
 	}
+	if err := s.takeHandleChange(r, handle.InstallationID); err != nil {
+		return err
+	}
 	if err := s.claim(host); err != nil {
 		return err
 	}
@@ -506,9 +516,21 @@ func (s *Server) owner(r *http.Request, installationID string) (Installation, er
 	return in, nil
 }
 
+// takeHandleChange limits minting and host deletion, which together could
+// otherwise churn handles and fill the replay cache.
+func (s *Server) takeHandleChange(r *http.Request, installationID string) error {
+	if wait := take(s.now(),
+		quota{s.handleChangesPerIP, clientNetwork(r)},
+		quota{s.handleChangesPerInstall, installationID},
+	); wait > 0 {
+		return rateLimited(wait)
+	}
+	return nil
+}
+
 type hostRequest struct {
 	key       ed25519.PublicKey
-	signature string
+	signature signature
 	until     time.Time
 	body      []byte
 }
@@ -537,11 +559,15 @@ func (s *Server) host(r *http.Request) (hostRequest, error) {
 	if !ed25519.Verify(key, []byte(message), sig) {
 		return hostRequest{}, errUnauthorized
 	}
-	return hostRequest{key: key, signature: string(sig), until: signed.Add(signatureWindow), body: body}, nil
+	return hostRequest{key: key, signature: signature(sig), until: signed.Add(signatureWindow), body: body}, nil
 }
 
 func (s *Server) claim(h hostRequest) error {
-	if !s.replays.add(h.signature, h.until, s.now()) {
+	fresh, wait := s.replays.add(h.signature, h.until, s.now())
+	if wait > 0 {
+		return rateLimited(wait)
+	}
+	if !fresh {
 		return fail(http.StatusUnauthorized, "unauthorized", "the request signature was already used")
 	}
 	return nil

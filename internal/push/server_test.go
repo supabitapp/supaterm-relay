@@ -189,6 +189,7 @@ func TestHandleLifecycle(t *testing.T) {
 	expect(t, g.call(http.MethodPost, base, in.OwnerToken, map[string]string{"hostKey": "short"}), http.StatusBadRequest, "invalid_request")
 	expect(t, g.call(http.MethodPost, base, "", map[string]string{"hostKey": b64u.EncodeToString(make([]byte, 32))}), http.StatusUnauthorized, "unauthorized")
 	for range maxHandles - 1 {
+		g.advance(2 * time.Minute)
 		g.mint(in, hostKey(t))
 	}
 	expect(t, g.call(http.MethodPost, base, in.OwnerToken, map[string]string{"hostKey": b64u.EncodeToString(make([]byte, 32))}), http.StatusConflict, "too_many_handles")
@@ -282,6 +283,23 @@ func TestRejectionOfReplacedTokenKeepsInstallation(t *testing.T) {
 	}
 	if got := g.apns.last(t).Token; got != token(2) {
 		t.Fatalf("send went to %s, want the rotated token", got)
+	}
+}
+
+func TestSendRefusedWhileReplayCacheIsFull(t *testing.T) {
+	g := newGateway(t)
+	host := hostKey(t)
+	handle := g.mint(g.enroll(token(1)), host)
+	g.s.replays = newReplayCache(1)
+	if w := g.send(host, handle); w.Code != http.StatusOK {
+		t.Fatalf("send: %d", w.Code)
+	}
+	before := g.apns.count()
+	g.advance(time.Millisecond)
+	w := g.send(host, handle)
+	expect(t, w, http.StatusTooManyRequests, "rate_limited")
+	if w.Header().Get("Retry-After") == "" || g.apns.count() != before {
+		t.Fatalf("full replay cache: Retry-After %q, reached APNs %v", w.Header().Get("Retry-After"), g.apns.count() != before)
 	}
 }
 
