@@ -44,6 +44,7 @@ Run one relay behind the TLS proxy. Hosts register and clients connect to that s
 - [Configuration](docs/configuration.md)
 - [Deployment](docs/deployment.md)
 - [Development](docs/development.md)
+- [Push gateway](docs/push.md)
 
 ## License
 

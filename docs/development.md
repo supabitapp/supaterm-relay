@@ -5,9 +5,10 @@ Use Go 1.27.2 or later. The module selects Go 1.27.2 through its `toolchain` dir
 | Command | Purpose |
 | --- | --- |
 | `make build` | Build `bin/relay` |
+| `make build-push` | Build the [push gateway](push.md) as `bin/push` |
 | `make run` | Listen on `127.0.0.1:8080` |
 | `make test` | Check formatting and `go.mod` tidiness, vet all packages, the container suite and the Supaterm interop suite, and run all Go tests in shuffled order with the race detector |
-| `make audit` | Report known vulnerabilities reachable from the relay binary with `govulncheck`. Standard library results depend on the local Go version |
+| `make audit` | Report known vulnerabilities reachable from the relay and push binaries with `govulncheck`. Standard library results depend on the local Go version |
 | `make e2e-docker` | Verify one relay through the published port and a separate probe container |
 | `make interop` | Run Supaterm's own relay host and client from `SUPATERM_DIR` against a race-enabled relay build |
 | `make bench` | Measure standalone relay echo throughput and latency on loopback |
