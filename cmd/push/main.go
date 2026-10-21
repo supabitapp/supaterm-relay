@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -36,10 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 	s := push.New(cfg, store, push.NewAPNsHTTPClient(), log)
-	envs := make([]string, 0, len(cfg.Credentials))
-	for env := range cfg.Credentials {
-		envs = append(envs, env)
-	}
+	envs := slices.Collect(maps.Keys(cfg.Credentials))
 	log.Info("listening", "address", ln.Addr().String(), "topics", cfg.Topics, "environments", envs)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

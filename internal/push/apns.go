@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -170,14 +169,8 @@ func (c *apnsClient) expire(p *providerToken, value string) {
 }
 
 func signProviderToken(key *ecdsa.PrivateKey, keyID, teamID string, now time.Time) (string, error) {
-	header, err := json.Marshal(map[string]string{"alg": "ES256", "kid": keyID})
-	if err != nil {
-		return "", err
-	}
-	claims, err := json.Marshal(map[string]any{"iss": teamID, "iat": now.Unix()})
-	if err != nil {
-		return "", err
-	}
+	header, _ := json.Marshal(map[string]string{"alg": "ES256", "kid": keyID})
+	claims, _ := json.Marshal(map[string]any{"iss": teamID, "iat": now.Unix()})
 	enc := base64.RawURLEncoding
 	input := enc.EncodeToString(header) + "." + enc.EncodeToString(claims)
 	digest := sha256.Sum256([]byte(input))
@@ -186,9 +179,6 @@ func signProviderToken(key *ecdsa.PrivateKey, keyID, teamID string, now time.Tim
 		return "", err
 	}
 	var sig [64]byte
-	if r.BitLen() > 256 || s.BitLen() > 256 {
-		return "", errors.New("signature out of range")
-	}
 	r.FillBytes(sig[:32])
 	s.FillBytes(sig[32:])
 	return input + "." + enc.EncodeToString(sig[:]), nil

@@ -245,23 +245,18 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) error {
 		Expiration:  now.Add(challengeTTL).Unix(),
 		Body:        challengeBody(e.ID, b64u.EncodeToString(code)),
 	})
-	if res.Outcome != apnsAccepted {
-		s.logAPNs("challenge", e.Environment, res)
-		if err := s.store.DeleteEnrollment(ctx, e.ID); err != nil {
-			return err
-		}
-	}
-	switch res.Outcome {
-	case apnsAccepted:
+	if res.Outcome == apnsAccepted {
 		writeJSON(w, http.StatusCreated, map[string]any{"enrollmentId": e.ID, "expiresAt": e.ExpiresAt.UnixMilli()})
 		return nil
-	case apnsGone:
-		return fail(http.StatusGone, "token_rejected", "APNs rejected the device token")
-	case apnsCredential:
-		return errCredential
-	default:
-		return errAPNs
 	}
+	s.logAPNs("challenge", e.Environment, res)
+	if err := s.store.DeleteEnrollment(ctx, e.ID); err != nil {
+		return err
+	}
+	if res.Outcome == apnsGone {
+		return fail(http.StatusGone, "token_rejected", "APNs rejected the device token")
+	}
+	return apnsError(res.Outcome)
 }
 
 func (s *Server) handleConfirm(w http.ResponseWriter, r *http.Request) error {
@@ -448,23 +443,18 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) error {
 		CollapseID:  req.CollapseID,
 		Body:        body,
 	})
-	if res.Outcome != apnsAccepted {
-		s.logAPNs("alert", in.Environment, res)
-	}
-	switch res.Outcome {
-	case apnsAccepted:
+	if res.Outcome == apnsAccepted {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "accepted"})
 		return nil
-	case apnsGone:
+	}
+	s.logAPNs("alert", in.Environment, res)
+	if res.Outcome == apnsGone {
 		if err := s.store.DeleteInstallation(ctx, in.ID); err != nil {
 			return err
 		}
 		return errGone
-	case apnsCredential:
-		return errCredential
-	default:
-		return errAPNs
 	}
+	return apnsError(res.Outcome)
 }
 
 func (s *Server) handleDeleteHostHandle(w http.ResponseWriter, r *http.Request) error {
@@ -552,6 +542,13 @@ func (s *Server) claim(h hostRequest) error {
 
 func (s *Server) logAPNs(kind, env string, res apnsResult) {
 	s.log.Warn("apns rejected push", "push", kind, "environment", env, "status", res.Status, "reason", res.Reason)
+}
+
+func apnsError(outcome apnsOutcome) error {
+	if outcome == apnsCredential {
+		return errCredential
+	}
+	return errAPNs
 }
 
 func clientNetwork(r *http.Request) string {
