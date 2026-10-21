@@ -14,6 +14,7 @@ import (
 var (
 	ErrNotFound       = errors.New("not found")
 	ErrTooManyHandles = errors.New("too many handles")
+	ErrTokenChanged   = errors.New("token changed")
 )
 
 const schema = `
@@ -199,17 +200,45 @@ func (s *Store) Installation(ctx context.Context, id string) (Installation, erro
 
 func (s *Store) DeleteInstallation(ctx context.Context, id string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		for _, q := range []string{
-			`DELETE FROM handles WHERE installation_id = ?`,
-			`DELETE FROM enrollments WHERE installation_id = ?`,
-			`DELETE FROM installations WHERE id = ?`,
-		} {
-			if _, err := tx.ExecContext(ctx, q, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM installations WHERE id = ?`, id); err != nil {
+			return err
+		}
+		return deleteChildren(ctx, tx, id)
+	})
+}
+
+// RetireInstallation deletes the installation only while it still holds
+// token, the token APNs rejected. An installation rotated to another token
+// since the send read it answers ErrTokenChanged; one already gone is nil.
+func (s *Store) RetireInstallation(ctx context.Context, id, token string) error {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM installations WHERE id = ? AND token = ?`, id, token)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			var exists bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM installations WHERE id = ?)`, id).Scan(&exists); err != nil {
 				return err
 			}
+			if exists {
+				return ErrTokenChanged
+			}
 		}
-		return nil
+		return deleteChildren(ctx, tx, id)
 	})
+}
+
+func deleteChildren(ctx context.Context, tx *sql.Tx, installationID string) error {
+	for _, q := range []string{
+		`DELETE FROM handles WHERE installation_id = ?`,
+		`DELETE FROM enrollments WHERE installation_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, installationID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) HandleCount(ctx context.Context, installationID string) (int, error) {
@@ -218,8 +247,17 @@ func (s *Store) HandleCount(ctx context.Context, installationID string) (int, er
 	return n, err
 }
 
+// CreateHandle answers ErrNotFound when the installation was deleted after
+// the caller authorized against it.
 func (s *Store) CreateHandle(ctx context.Context, h Handle, limit int, now time.Time) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM installations WHERE id = ?)`, h.InstallationID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM handles WHERE installation_id = ?`, h.InstallationID).Scan(&n); err != nil {
 			return err

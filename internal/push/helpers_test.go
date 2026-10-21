@@ -36,6 +36,13 @@ type fakeAPNs struct {
 	mu      sync.Mutex
 	calls   []apnsCall
 	replies map[string]apnsReply
+	gates   map[string]*apnsGate
+}
+
+type apnsGate struct {
+	arrived chan struct{}
+	release func()
+	open    chan struct{}
 }
 
 type apnsReply struct {
@@ -44,7 +51,7 @@ type apnsReply struct {
 }
 
 func newFakeAPNs(t *testing.T) *fakeAPNs {
-	f := &fakeAPNs{replies: map[string]apnsReply{}}
+	f := &fakeAPNs{replies: map[string]apnsReply{}, gates: map[string]*apnsGate{}}
 	f.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor != 2 {
 			t.Errorf("APNs request over %s, want HTTP/2", r.Proto)
@@ -54,7 +61,13 @@ func newFakeAPNs(t *testing.T) *fakeAPNs {
 		f.mu.Lock()
 		f.calls = append(f.calls, apnsCall{Token: token, Header: r.Header.Clone(), Body: body})
 		reply, ok := f.replies[token]
+		gate := f.gates[token]
+		delete(f.gates, token)
 		f.mu.Unlock()
+		if gate != nil {
+			close(gate.arrived)
+			<-gate.open
+		}
 		if !ok {
 			reply = apnsReply{status: http.StatusOK}
 		}
@@ -73,6 +86,18 @@ func (f *fakeAPNs) reply(token string, status int, reason string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.replies[token] = apnsReply{status, reason}
+}
+
+// hold parks the next request for token after recording it, until the test
+// calls release.
+func (f *fakeAPNs) hold(t *testing.T, token string) *apnsGate {
+	open := make(chan struct{})
+	g := &apnsGate{arrived: make(chan struct{}), open: open, release: sync.OnceFunc(func() { close(open) })}
+	f.mu.Lock()
+	f.gates[token] = g
+	f.mu.Unlock()
+	t.Cleanup(g.release)
+	return g
 }
 
 func (f *fakeAPNs) last(t *testing.T) apnsCall {

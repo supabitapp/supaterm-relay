@@ -252,6 +252,39 @@ func TestSendRejectsAnotherHostsHandle(t *testing.T) {
 	}
 }
 
+func TestSendRetiresRejectedToken(t *testing.T) {
+	g := newGateway(t)
+	host := hostKey(t)
+	in := g.enroll(token(1))
+	handle := g.mint(in, host)
+	g.apns.reply(token(1), http.StatusGone, "Unregistered")
+	expect(t, g.send(host, handle), http.StatusGone, "gone")
+	expect(t, g.call(http.MethodGet, "/v1/installations/"+in.InstallationID, in.OwnerToken, nil), http.StatusNotFound, "not_found")
+}
+
+func TestRejectionOfReplacedTokenKeepsInstallation(t *testing.T) {
+	g := newGateway(t)
+	host := hostKey(t)
+	in := g.enroll(token(1))
+	handle := g.mint(in, host)
+	g.apns.reply(token(1), http.StatusGone, "Unregistered")
+	gate := g.apns.hold(t, token(1))
+	sent := make(chan *httptest.ResponseRecorder)
+	go func() { sent <- g.send(host, handle) }()
+	<-gate.arrived
+	g.confirm(g.startEnrollment(token(2), in.InstallationID, in.OwnerToken))
+	gate.release()
+	expect(t, <-sent, http.StatusBadGateway, "apns_unavailable")
+
+	g.advance(time.Millisecond)
+	if w := g.send(host, handle); w.Code != http.StatusOK {
+		t.Fatalf("send after rotation: %d %s", w.Code, w.Body)
+	}
+	if got := g.apns.last(t).Token; got != token(2) {
+		t.Fatalf("send went to %s, want the rotated token", got)
+	}
+}
+
 func TestSendValidation(t *testing.T) {
 	g := newGateway(t)
 	host := hostKey(t)

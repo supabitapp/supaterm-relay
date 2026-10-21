@@ -114,3 +114,46 @@ func TestStoreRotationOfDeletedInstallationKeepsEnrollmentUnused(t *testing.T) {
 		t.Fatalf("rotation of a missing installation created %d installations", n)
 	}
 }
+
+func TestStoreCreateHandleRequiresInstallation(t *testing.T) {
+	s := openTestStore(t, filepath.Join(t.TempDir(), "push.sqlite"))
+	err := s.CreateHandle(t.Context(), Handle{Handle: "h1", InstallationID: "gone", HostKey: []byte{1}}, maxHandles, testEpoch)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("create handle for a missing installation = %v", err)
+	}
+	if _, _, err := s.Target(t.Context(), "h1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("orphan handle was stored: %v", err)
+	}
+}
+
+func TestStoreRetireInstallationOnlyForItsCurrentToken(t *testing.T) {
+	ctx := t.Context()
+	now := testEpoch
+	s := openTestStore(t, filepath.Join(t.TempDir(), "push.sqlite"))
+	e := Enrollment{ID: "e1", Token: token(1), Topic: testTopic, Environment: Sandbox, CodeHash: []byte{1}, ExpiresAt: now.Add(time.Minute)}
+	if err := s.CreateEnrollment(ctx, e, now); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.ConfirmEnrollment(ctx, e, Installation{ID: "i1", OwnerTokenHash: []byte{2}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateHandle(ctx, Handle{Handle: "h1", InstallationID: id, HostKey: []byte{3}}, maxHandles, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RetireInstallation(ctx, id, token(2)); !errors.Is(err, ErrTokenChanged) {
+		t.Fatalf("retire with another token = %v", err)
+	}
+	if _, _, err := s.Target(ctx, "h1"); err != nil {
+		t.Fatalf("retiring another token removed the handle: %v", err)
+	}
+	if err := s.RetireInstallation(ctx, id, token(1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Target(ctx, "h1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("handle survived retirement: %v", err)
+	}
+	if err := s.RetireInstallation(ctx, id, token(1)); err != nil {
+		t.Fatalf("retiring a deleted installation = %v", err)
+	}
+}

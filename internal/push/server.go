@@ -357,6 +357,9 @@ func (s *Server) handleCreateHandle(w http.ResponseWriter, r *http.Request) erro
 	}
 	h := Handle{Handle: b64u.EncodeToString(randomBytes(16)), InstallationID: in.ID, HostKey: hostKey}
 	err = s.store.CreateHandle(r.Context(), h, maxHandles, s.now())
+	if errors.Is(err, ErrNotFound) {
+		return errNotFound
+	}
 	if errors.Is(err, ErrTooManyHandles) {
 		return fail(http.StatusConflict, "too_many_handles", "the installation has the maximum number of handles")
 	}
@@ -449,7 +452,11 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.logAPNs("alert", in.Environment, res)
 	if res.Outcome == apnsGone {
-		if err := s.store.DeleteInstallation(ctx, in.ID); err != nil {
+		err := s.store.RetireInstallation(ctx, in.ID, in.Token)
+		if errors.Is(err, ErrTokenChanged) {
+			return errAPNs
+		}
+		if err != nil {
 			return err
 		}
 		return errGone
