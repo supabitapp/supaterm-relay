@@ -55,7 +55,7 @@ A handle is bound to the host key the phone minted it for. `/v1/send` answers 41
 | APNs answer | Gateway answer |
 | --- | --- |
 | 200 | 200 `accepted` |
-| 410, or 400 `BadDeviceToken` / `DeviceTokenNotForTopic` | Deletes the installation, 410 `gone` |
+| 410, or 400 `BadDeviceToken` / `DeviceTokenNotForTopic` | Deletes the installation, 410 `gone`; 502 `apns_unavailable` instead if the phone rotated its token during the send |
 | 403, or 400 `BadTopic` / `TopicDisallowed` / `MissingTopic` | 503 `gateway_unavailable`: the gateway's credentials or topics are wrong |
 | 429, 5xx, other errors, or no answer | 502 `apns_unavailable` |
 
