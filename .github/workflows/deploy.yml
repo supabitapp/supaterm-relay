@@ -38,7 +38,7 @@ jobs:
           GOARCH: amd64
       - name: Configure SSH
         env:
-          SSH_KEY: ${{ secrets.RELAY2_SSH_KEY }}
+          SSH_KEY: ${{ secrets.RELAY_SSH_KEY }}
           KNOWN_HOST: 13.63.231.197 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC8UbXV98tfh6AjO8Em+X+nXTVcOUUN1+FoCkzwqK/Td
         run: |
           install -m 700 -d ~/.ssh
@@ -47,17 +47,16 @@ jobs:
           printf '%s\n' "$KNOWN_HOST" > ~/.ssh/known_hosts
       - name: Check hand-installed files
         run: |
-          check() { ssh -o BatchMode=yes "$SSH_TARGET" "cat $2" | diff -u "deploy/relay2/$1" -; }
+          check() { ssh -o BatchMode=yes "$SSH_TARGET" "cat $2" | diff -u "deploy/$1" -; }
           check Caddyfile /etc/caddy/Caddyfile
           check nftables.conf /etc/nftables.conf
-          check memory.conf /etc/systemd/system/supaterm-relay.service.d/memory.conf
       - name: Install relay
         run: |
           scp -o BatchMode=yes bin/relay deploy/supaterm-relay.service "$SSH_TARGET:/tmp/"
           ssh -o BatchMode=yes "$SSH_TARGET" 'bash -s' < deploy/install-relay.sh
       - name: Smoke test through the public endpoints
         run: |
-          for url in wss://relay.supaterm.com wss://relay.supacode.sh wss://relay2.supaterm.com; do
+          for url in wss://relay.supaterm.com wss://relay.supacode.sh; do
             go run ./e2e/docker/probe -mode smoke -url wss://relay.supaterm.com -client-url "$url" -n 6
           done
           go run ./e2e/docker/probe -mode tunnel -url wss://relay.supaterm.com -n 4

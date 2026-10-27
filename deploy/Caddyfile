@@ -3,7 +3,7 @@
 	admin off
 }
 
-https://relay.supaterm.com, https://relay.supacode.sh, https://relay2.supaterm.com {
+https://relay.supaterm.com, https://relay.supacode.sh {
 	tls /etc/caddy/origin.pem /etc/caddy/origin.key {
 		client_auth {
 			mode require_and_verify

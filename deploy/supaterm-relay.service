@@ -8,7 +8,7 @@ ExecStart=/usr/local/bin/supaterm-relay
 Environment=RELAY_ADDR=127.0.0.1:8080
 Environment=RELAY_PRIVATE_ADDR=127.0.0.1:9090
 Environment=RELAY_TRUSTED_PROXIES=127.0.0.1/32
-Environment=GOMEMLIMIT=2GiB
+Environment=GOMEMLIMIT=1GiB
 Restart=always
 RestartSec=2
 TimeoutStopSec=15
@@ -18,7 +18,7 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 LimitNOFILE=131072
-MemoryMax=3G
+MemoryMax=1536M
 
 [Install]
 WantedBy=multi-user.target
