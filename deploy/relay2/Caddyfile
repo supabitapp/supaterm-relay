@@ -1,0 +1,16 @@
+{
+	auto_https off
+	admin off
+}
+
+https://relay2.supaterm.com {
+	tls /etc/caddy/origin.pem /etc/caddy/origin.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/caddy/origin-pull-ca.pem
+		}
+	}
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+	}
+}
