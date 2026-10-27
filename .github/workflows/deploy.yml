@@ -58,6 +58,6 @@ jobs:
       - name: Smoke test through the public endpoints
         run: |
           for url in wss://relay.supaterm.com wss://relay.supacode.sh wss://relay2.supaterm.com; do
-            go run ./e2e/docker/probe -mode smoke -url "$url" -n 6
+            go run ./e2e/docker/probe -mode smoke -url wss://relay.supaterm.com -client-url "$url" -n 6
           done
           go run ./e2e/docker/probe -mode tunnel -url wss://relay.supaterm.com -n 4
