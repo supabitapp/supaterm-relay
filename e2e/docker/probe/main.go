@@ -25,6 +25,7 @@ func main() {
 	mode := flag.String("mode", "http", "http, control, connect, smoke, or tunnel")
 	target := flag.String("url", "", "URL for http mode, ws base for control and connect")
 	n := flag.Int("n", 1, "attempts")
+	clientURL := flag.String("client-url", "", "ws base smoke clients connect through; defaults to -url")
 	xff := flag.String("xff", "", "spoofed X-Forwarded-For, X-Real-IP, and Forwarded value")
 	endpointID := flag.String("endpoint", strings.Repeat("ab", 32), "endpoint id for connect mode")
 	flag.Parse()
@@ -40,7 +41,10 @@ func main() {
 			os.Exit(1)
 		}
 	case "smoke":
-		pairs, err := smoke(*target, *n)
+		if *clientURL == "" {
+			*clientURL = *target
+		}
+		pairs, err := smoke(*target, *clientURL, *n)
 		out["pairsVerified"] = pairs
 		if err != nil {
 			out["error"] = err.Error()
@@ -86,7 +90,7 @@ func main() {
 	_ = json.NewEncoder(os.Stdout).Encode(out)
 }
 
-func smoke(base string, hosts int) (int, error) {
+func smoke(base, clientBase string, hosts int) (int, error) {
 	verified := 0
 	if hosts <= 0 {
 		return 0, errors.New("host count must be positive")
@@ -97,7 +101,7 @@ func smoke(base string, hosts int) (int, error) {
 		if err != nil {
 			return verified, fmt.Errorf("host %d register: %w", i, err)
 		}
-		err = smokePair(base, h)
+		err = smokePair(clientBase, h)
 		h.Close()
 		if err != nil {
 			return verified, fmt.Errorf("host %d: %w", i, err)
@@ -107,8 +111,8 @@ func smoke(base string, hosts int) (int, error) {
 	return verified, nil
 }
 
-func smokePair(base string, h *endpoint.Host) error {
-	client, resp, err := endpoint.Connect(base, h.ID)
+func smokePair(clientBase string, h *endpoint.Host) error {
+	client, resp, err := endpoint.Connect(clientBase, h.ID)
 	if err != nil {
 		if resp != nil {
 			return fmt.Errorf("connect: HTTP %d", resp.StatusCode)

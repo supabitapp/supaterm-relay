@@ -20,28 +20,13 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   deploy:
-    name: deploy (${{ matrix.relay }})
     needs: ci
     runs-on: depot-ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - relay: relay.supaterm.com
-            ssh-target: supaterm-relay.exe.xyz
-            ssh-key: EXE_SSH_KEY
-            known-host: supaterm-relay.exe.xyz ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDEKtEcRW8OBtro5B/MG+EaisD+ZVwwHFa5m7M8wFwBlMmPJJssY+1aGBRW3b9InAeCnTU2Kt7gazqbg/9od1KnK6x5piQNVQZ4C/lrjsC2ScBrOydnw9ry9G2+voFCAk+dQGabIrIT6gqqDJNOqxgFiG/lA3Xx6KwpfwI2BH5f3ab2fHCR2BGAC5jlB2RJXPgly80hMxYEHqexhJxYRwC+deeLrQSG795we9rSzPmdz58t9+9jLTKkyyqWKe/hmBvty1AYrEmRsefu6/TUrIGi/UWJfa+RBIQtFgWqN6xT1F6rRwELeVOfwwr5tZbsmgWY5frZU3EOtVWcF7Ve3gfL
-            origin-url: wss://supaterm-relay.exe.xyz
-          - relay: relay2.supaterm.com
-            ssh-target: ubuntu@13.63.231.197
-            ssh-key: RELAY2_SSH_KEY
-            known-host: 13.63.231.197 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC8UbXV98tfh6AjO8Em+X+nXTVcOUUN1+FoCkzwqK/Td
     environment:
       name: production
-      url: https://${{ matrix.relay }}/
+      url: https://relay.supaterm.com/
     env:
-      PUBLIC_RELAY_URL: wss://${{ matrix.relay }}
-      SSH_TARGET: ${{ matrix.ssh-target }}
+      SSH_TARGET: ubuntu@13.63.231.197
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -53,15 +38,14 @@ jobs:
           GOARCH: amd64
       - name: Configure SSH
         env:
-          SSH_KEY: ${{ secrets[matrix.ssh-key] }}
-          KNOWN_HOST: ${{ matrix.known-host }}
+          SSH_KEY: ${{ secrets.RELAY2_SSH_KEY }}
+          KNOWN_HOST: 13.63.231.197 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC8UbXV98tfh6AjO8Em+X+nXTVcOUUN1+FoCkzwqK/Td
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$KNOWN_HOST" > ~/.ssh/known_hosts
-      - name: Check relay2's hand-installed files
-        if: matrix.relay == 'relay2.supaterm.com'
+      - name: Check hand-installed files
         run: |
           check() { ssh -o BatchMode=yes "$SSH_TARGET" "cat $2" | diff -u "deploy/relay2/$1" -; }
           check Caddyfile /etc/caddy/Caddyfile
@@ -71,12 +55,9 @@ jobs:
         run: |
           scp -o BatchMode=yes bin/relay deploy/supaterm-relay.service "$SSH_TARGET:/tmp/"
           ssh -o BatchMode=yes "$SSH_TARGET" 'bash -s' < deploy/install-relay.sh
-      - name: Smoke test through the public endpoint
+      - name: Smoke test through the public endpoints
         run: |
-          go run ./e2e/docker/probe -mode smoke -url "$PUBLIC_RELAY_URL" -n 6
-          go run ./e2e/docker/probe -mode tunnel -url "$PUBLIC_RELAY_URL" -n 4
-      - name: Smoke test the origin directly
-        if: matrix.origin-url
-        env:
-          ORIGIN_URL: ${{ matrix.origin-url }}
-        run: go run ./e2e/docker/probe -mode smoke -url "$ORIGIN_URL" -n 6
+          for url in wss://relay.supaterm.com wss://relay.supacode.sh wss://relay2.supaterm.com; do
+            go run ./e2e/docker/probe -mode smoke -url wss://relay.supaterm.com -client-url "$url" -n 6
+          done
+          go run ./e2e/docker/probe -mode tunnel -url wss://relay.supaterm.com -n 4

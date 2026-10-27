@@ -36,7 +36,7 @@ docker run -p 8080:8080 supaterm-relay
 
 The relay does not terminate TLS, so put it behind a proxy that serves `wss://`. Settings are `RELAY_*` environment variables, listed in [configuration](docs/configuration.md).
 
-Run one relay behind the TLS proxy. Hosts register and clients connect to that same instance. See [deployment](docs/deployment.md) for the production service and cutover.
+Run one relay behind the TLS proxy. Hosts register and clients connect to that same instance. See [deployment](docs/deployment.md) for the production service.
 
 ## Docs
 
