@@ -38,7 +38,7 @@ jobs:
           GOARCH: amd64
       - name: Configure SSH
         env:
-          SSH_KEY: ${{ secrets.RELAY2_SSH_KEY }}
+          SSH_KEY: ${{ secrets.RELAY_SSH_KEY }}
           KNOWN_HOST: 13.63.231.197 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC8UbXV98tfh6AjO8Em+X+nXTVcOUUN1+FoCkzwqK/Td
         run: |
           install -m 700 -d ~/.ssh
@@ -56,7 +56,7 @@ jobs:
           ssh -o BatchMode=yes "$SSH_TARGET" 'bash -s' < deploy/install-relay.sh
       - name: Smoke test through the public endpoints
         run: |
-          for url in wss://relay.supaterm.com wss://relay.supacode.sh wss://relay2.supaterm.com; do
+          for url in wss://relay.supaterm.com wss://relay.supacode.sh; do
             go run ./e2e/docker/probe -mode smoke -url wss://relay.supaterm.com -client-url "$url" -n 6
           done
           go run ./e2e/docker/probe -mode tunnel -url wss://relay.supaterm.com -n 4
