@@ -47,10 +47,9 @@ jobs:
           printf '%s\n' "$KNOWN_HOST" > ~/.ssh/known_hosts
       - name: Check hand-installed files
         run: |
-          check() { ssh -o BatchMode=yes "$SSH_TARGET" "cat $2" | diff -u "deploy/relay2/$1" -; }
+          check() { ssh -o BatchMode=yes "$SSH_TARGET" "cat $2" | diff -u "deploy/$1" -; }
           check Caddyfile /etc/caddy/Caddyfile
           check nftables.conf /etc/nftables.conf
-          check memory.conf /etc/systemd/system/supaterm-relay.service.d/memory.conf
       - name: Install relay
         run: |
           scp -o BatchMode=yes bin/relay deploy/supaterm-relay.service "$SSH_TARGET:/tmp/"
