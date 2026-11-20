@@ -89,7 +89,7 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /v1/control", s.admit(false, s.handleControl))
 	mux.HandleFunc("GET /v1/connect", s.admit(false, s.handleConnect))
 	mux.HandleFunc("GET /v1/accept", s.admit(true, s.handleAccept))
-	mux.Handle("GET /dashboard/", http.StripPrefix("/dashboard", dashboard.New(s.dashboardStats, s.limitPublic)))
+	mux.Handle("GET /dashboard/", http.StripPrefix("/dashboard", dashboard.New("relay", s.dashboardStats, s.limitPublic)))
 	s.http = newHTTPServer(protocolUnderAnyPrefix(mux))
 	s.private = newHTTPServer(admin)
 	return s
@@ -194,12 +194,14 @@ func (s *Server) dashboardStats() dashboard.Stats {
 		ForwardedMessages: s.forwardedMessages.Load(),
 		ForwardedBytes:    s.forwardedBytes.Load(),
 	}
-	stats.RejectedConnections, stats.RejectedConnectionsByReason = s.rejectionCounts()
+	stats.Rejected, stats.RejectedByReason = s.rejectionCounts()
 	s.mu.Lock()
-	stats.ActiveHosts = len(s.hosts)
-	stats.ActivePairs = s.active
-	stats.PendingPairs = s.pending
-	stats.OpenSockets = len(s.conns)
+	stats.Counts = []dashboard.Count{
+		{Label: "Connected hosts", Value: int64(len(s.hosts))},
+		{Label: "Active pairs", Value: int64(s.active)},
+		{Label: "Pending pairs", Value: int64(s.pending)},
+		{Label: "Open sockets", Value: int64(len(s.conns))},
+	}
 	s.mu.Unlock()
 	return stats
 }

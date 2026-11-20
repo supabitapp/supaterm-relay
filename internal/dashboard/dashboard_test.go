@@ -38,14 +38,14 @@ func findRow(t *testing.T, v view, label string) row {
 }
 
 func TestPageEmbedsCurrentStats(t *testing.T) {
-	stats := Stats{ActiveHosts: 3}
-	d := New(func() Stats { return stats }, unlimited)
+	stats := Stats{Counts: []Count{{Label: "Connected hosts", Value: 3}}}
+	d := New("relay", func() Stats { return stats }, unlimited)
 	response := serve(t, d, "/", nil)
 	body := response.Body.String()
 	if response.Code != http.StatusOK || response.Header().Get("Content-Security-Policy") != contentSecurityPolicy || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("page: %d %v", response.Code, response.Header())
 	}
-	for _, want := range []string{`hx-get="stats"`, `hx-trigger="every 2s"`, ">Online<", "Connected hosts", `<span class="value">3</span>`, "Traffic (1 min avg)"} {
+	for _, want := range []string{"<title>Supaterm relay</title>", "<h1>Supaterm relay</h1>", "<h2>Relay</h2>", `hx-get="stats"`, `hx-trigger="every 2s"`, ">Online<", "Connected hosts", `<span class="value">3</span>`, "Traffic (1 min avg)"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("page is missing %q:\n%s", want, body)
 		}
@@ -54,7 +54,7 @@ func TestPageEmbedsCurrentStats(t *testing.T) {
 
 func TestStatsFragmentReportsDraining(t *testing.T) {
 	stats := Stats{Draining: true}
-	body := serve(t, New(func() Stats { return stats }, unlimited), "/stats", nil).Body.String()
+	body := serve(t, New("relay", func() Stats { return stats }, unlimited), "/stats", nil).Body.String()
 	if strings.Contains(body, "<html") || !strings.Contains(body, `class="status draining">Draining<`) {
 		t.Fatalf("incorrect stats fragment:\n%s", body)
 	}
@@ -66,7 +66,7 @@ func TestLimitAppliesToPagesNotAssets(t *testing.T) {
 			w.WriteHeader(http.StatusTooManyRequests)
 		})
 	}
-	d := New(func() Stats { return Stats{} }, reject)
+	d := New("relay", func() Stats { return Stats{} }, reject)
 	for path, status := range map[string]int{
 		"/":                             http.StatusTooManyRequests,
 		"/stats":                        http.StatusTooManyRequests,
@@ -89,7 +89,7 @@ func TestLimitAppliesToPagesNotAssets(t *testing.T) {
 }
 
 func TestAssetsRevalidateWithETags(t *testing.T) {
-	d := New(func() Stats { return Stats{} }, unlimited)
+	d := New("relay", func() Stats { return Stats{} }, unlimited)
 	first := serve(t, d, "/static/htmx-2.0.11.min.js", nil)
 	tag := first.Header().Get("ETag")
 	if first.Code != http.StatusOK || tag == "" || first.Header().Get("Cache-Control") != "no-cache" {
@@ -105,7 +105,7 @@ func TestAssetsRevalidateWithETags(t *testing.T) {
 
 func TestSnapshotSamplesAtMostOncePerRefresh(t *testing.T) {
 	calls := 0
-	d := New(func() Stats {
+	d := New("relay", func() Stats {
 		calls++
 		return Stats{}
 	}, unlimited)
@@ -119,7 +119,7 @@ func TestSnapshotSamplesAtMostOncePerRefresh(t *testing.T) {
 
 func TestTrafficRatesAverageTheLastMinute(t *testing.T) {
 	stats := Stats{ForwardedMessages: 1200, ForwardedBytes: 1 << 20}
-	d := New(func() Stats { return stats }, unlimited)
+	d := New("relay", func() Stats { return stats }, unlimited)
 	initial := d.snapshot(d.started)
 	for _, label := range []string{"Messages", "Throughput"} {
 		if got := findRow(t, initial, label).Value; got != unknown {
@@ -159,7 +159,7 @@ func TestTrafficRatesRestartAfterGapsOrCounterResets(t *testing.T) {
 	for _, reason := range []string{"monitoring gap", "messages reset", "bytes reset"} {
 		t.Run(reason, func(t *testing.T) {
 			stats := Stats{ForwardedMessages: 1000, ForwardedBytes: 1 << 20}
-			d := New(func() Stats { return stats }, unlimited)
+			d := New("relay", func() Stats { return stats }, unlimited)
 			d.snapshot(d.started)
 			stats.ForwardedMessages += 20
 			stats.ForwardedBytes += 2048
@@ -194,7 +194,7 @@ func TestTrafficRatesRestartAfterGapsOrCounterResets(t *testing.T) {
 }
 
 func TestBuildReportsCPUOverTheSampleWindow(t *testing.T) {
-	d := &Dashboard{started: time.Now()}
+	d := &Dashboard{name: "relay", started: time.Now()}
 	previous := sample{at: d.started, cpuOK: true, cpus: 4}
 	current := previous
 	current.at = previous.at.Add(2 * time.Second)
@@ -206,7 +206,7 @@ func TestBuildReportsCPUOverTheSampleWindow(t *testing.T) {
 }
 
 func TestBuildOmitsRatesAfterAQuietPeriod(t *testing.T) {
-	d := &Dashboard{started: time.Now()}
+	d := &Dashboard{name: "relay", started: time.Now()}
 	previous := sample{at: d.started, cpuOK: true, cpus: 1}
 	current := previous
 	current.at = previous.at.Add(time.Hour)
@@ -223,7 +223,7 @@ func TestBuildOmitsRatesAfterAQuietPeriod(t *testing.T) {
 }
 
 func TestBuildGaugesMemoryLimits(t *testing.T) {
-	d := &Dashboard{started: time.Now()}
+	d := &Dashboard{name: "relay", started: time.Now()}
 	current := sample{
 		at:          d.started,
 		retained:    1 << 30,

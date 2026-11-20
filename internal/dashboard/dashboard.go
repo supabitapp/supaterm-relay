@@ -39,18 +39,22 @@ var (
 
 type Stats struct {
 	Draining          bool
-	ActiveHosts       int
-	ActivePairs       int
-	PendingPairs      int
-	OpenSockets       int
+	Counts            []Count
 	ForwardedMessages int64
 	ForwardedBytes    int64
 
-	RejectedConnections         int64
-	RejectedConnectionsByReason map[string]int64
+	Rejected         int64
+	RejectedByReason map[string]int64
+}
+
+type Count struct {
+	Label  string
+	Value  int64
+	Detail string
 }
 
 type Dashboard struct {
+	name    string
 	stats   func() Stats
 	started time.Time
 	mux     *http.ServeMux
@@ -87,6 +91,7 @@ type sample struct {
 
 type view struct {
 	at       time.Time
+	Title    string
 	Draining bool
 	Time     string
 	Uptime   string
@@ -107,8 +112,8 @@ type row struct {
 	Meter  bool
 }
 
-func New(stats func() Stats, limit func(http.Handler) http.Handler) *Dashboard {
-	d := &Dashboard{stats: stats, started: time.Now(), mux: http.NewServeMux()}
+func New(name string, stats func() Stats, limit func(http.Handler) http.Handler) *Dashboard {
+	d := &Dashboard{name: name, stats: stats, started: time.Now(), mux: http.NewServeMux()}
 	d.last = takeSample(d.started, Stats{})
 	d.mux.Handle("GET /{$}", limit(d.render("page")))
 	d.mux.Handle("GET /stats", limit(d.render("stats")))
@@ -222,31 +227,39 @@ func (d *Dashboard) build(previous, current sample) view {
 	relay := current.relay
 	return view{
 		at:       current.at,
+		Title:    "Supaterm " + d.name,
 		Draining: relay.Draining,
 		Time:     current.at.UTC().Format("2006-01-02 15:04:05 UTC"),
 		Uptime:   formatUptime(current.at.Sub(d.started)),
 		Started:  d.started.UTC().Format("2006-01-02 15:04 UTC"),
 		Sections: []section{
-			{"Relay", []row{
-				{Label: "Connected hosts", Value: formatCount(int64(relay.ActiveHosts))},
-				{Label: "Active pairs", Value: formatCount(int64(relay.ActivePairs))},
-				{Label: "Pending pairs", Value: formatCount(int64(relay.PendingPairs))},
-				{Label: "Open sockets", Value: formatCount(int64(relay.OpenSockets))},
-			}},
-			{"Rejections", rejectionRows(relay.RejectedConnections, relay.RejectedConnectionsByReason)},
+			{capitalize(d.name), countRows(relay.Counts)},
+			{"Rejections", rejectionRows(relay.Rejected, relay.RejectedByReason)},
 			{"Traffic (1 min avg)", d.trafficRows(current)},
-			{"CPU", cpuRows(previous, current)},
+			{"CPU", cpuRows(capitalize(d.name)+" process", previous, current)},
 			{"Memory", memoryRows(current)},
 		},
 	}
 }
 
+func countRows(counts []Count) []row {
+	rows := make([]row, len(counts))
+	for i, c := range counts {
+		rows[i] = row{Label: c.Label, Value: formatCount(c.Value), Detail: c.Detail}
+	}
+	return rows
+}
+
 func rejectionRows(total int64, byReason map[string]int64) []row {
 	rows := []row{{Label: "Total", Value: formatCount(total), Detail: "since start"}}
 	for _, reason := range slices.Sorted(maps.Keys(byReason)) {
-		rows = append(rows, row{Label: strings.ToUpper(reason[:1]) + reason[1:], Value: formatCount(byReason[reason])})
+		rows = append(rows, row{Label: capitalize(reason), Value: formatCount(byReason[reason])})
 	}
 	return rows
+}
+
+func capitalize(s string) string {
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func rateWindow(previous, current sample) (seconds float64, ok bool) {
@@ -268,12 +281,12 @@ func (d *Dashboard) trafficRows(current sample) []row {
 	return []row{messages, throughput}
 }
 
-func cpuRows(previous, current sample) []row {
+func cpuRows(process string, previous, current sample) []row {
 	cores := formatCount(int64(current.cpus)) + " cores"
 	if current.cpus == 1 {
 		cores = "1 core"
 	}
-	usage := row{Label: "Relay process", Value: unknown, Detail: "of " + cores}
+	usage := row{Label: process, Value: unknown, Detail: "of " + cores}
 	if seconds, ok := rateWindow(previous, current); ok && previous.cpuOK && current.cpuOK {
 		fraction := (current.cpu - previous.cpu).Seconds() / seconds / float64(current.cpus)
 		usage = gauge(usage.Label, formatPercent(fraction), usage.Detail, fraction)
