@@ -184,3 +184,18 @@ func TestGateLimits(t *testing.T) {
 		t.Fatalf("leaked state total=%d ips=%d", total, ips)
 	}
 }
+
+func TestKeyedKeepsSlowBucketsUntilTheyRefill(t *testing.T) {
+	l := NewKeyed[string](1.0/600, 2)
+	now := time.Unix(0, 0)
+	if !l.Allow("a", now) || !l.Allow("a", now) || l.Allow("a", now) {
+		t.Fatal("burst of 2 not enforced")
+	}
+	if l.Allow("a", now.Add(5*time.Minute)) {
+		t.Fatal("bucket reset after a minute idle instead of refilling")
+	}
+	l.Allow("b", now.Add(26*time.Minute))
+	if l.Size() != 1 {
+		t.Fatalf("size = %d, want the refilled bucket expired", l.Size())
+	}
+}

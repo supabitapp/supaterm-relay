@@ -1,6 +1,6 @@
 {{define "stats"}}
 <header>
-  <h1>Supaterm relay</h1>
+  <h1>{{.Title}}</h1>
   <p class="status{{if .Draining}} draining{{end}}">{{if .Draining}}Draining{{else}}Online{{end}}</p>
 </header>
 <p class="summary">

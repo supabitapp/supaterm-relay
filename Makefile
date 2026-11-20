@@ -1,7 +1,10 @@
-.PHONY: build run test check test-race audit e2e-docker interop bench bench-docker
+.PHONY: build build-push run test check test-race audit e2e-docker interop bench bench-docker
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/relay ./cmd/relay
+
+build-push:
+	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/push ./cmd/push
 
 run: build
 	./bin/relay
@@ -22,7 +25,7 @@ test-race:
 	go test -race -count=1 -shuffle=on ./...
 
 audit:
-	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./cmd/relay
+	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./cmd/relay ./cmd/push
 
 e2e-docker:
 	./e2e/docker/run.sh

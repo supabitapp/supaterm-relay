@@ -224,11 +224,30 @@ func TestDashboardStatsMatchMetrics(t *testing.T) {
 	offline.Body.Close()
 	response := httptest.NewRecorder()
 	s.handleMetrics(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	var want dashboard.Stats
-	if err := json.Unmarshal(response.Body.Bytes(), &want); err != nil {
+	var metrics struct {
+		Draining                                            bool
+		ActiveHosts, ActivePairs, PendingPairs, OpenSockets int64
+		ForwardedMessages, ForwardedBytes                   int64
+		RejectedConnections                                 int64
+		RejectedConnectionsByReason                         map[string]int64
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &metrics); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.dashboardStats(); !reflect.DeepEqual(got, want) || got.ActiveHosts != 1 || got.ActivePairs != 1 || got.RejectedConnections != 1 {
+	want := dashboard.Stats{
+		Draining: metrics.Draining,
+		Counts: []dashboard.Count{
+			{Label: "Connected hosts", Value: metrics.ActiveHosts},
+			{Label: "Active pairs", Value: metrics.ActivePairs},
+			{Label: "Pending pairs", Value: metrics.PendingPairs},
+			{Label: "Open sockets", Value: metrics.OpenSockets},
+		},
+		ForwardedMessages: metrics.ForwardedMessages,
+		ForwardedBytes:    metrics.ForwardedBytes,
+		Rejected:          metrics.RejectedConnections,
+		RejectedByReason:  metrics.RejectedConnectionsByReason,
+	}
+	if got := s.dashboardStats(); !reflect.DeepEqual(got, want) || metrics.ActiveHosts != 1 || metrics.ActivePairs != 1 || metrics.RejectedConnections != 1 {
 		t.Fatalf("dashboard stats = %+v, want %+v", got, want)
 	}
 }

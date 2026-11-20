@@ -19,62 +19,75 @@ const (
 	expireBatch = 64
 )
 
-type Limiter struct {
+type Keyed[K comparable] struct {
 	mu      sync.Mutex
 	rate    rate.Limit
 	burst   int
-	entries map[netip.Addr]*limiterEntry
+	idle    time.Duration
+	entries map[K]*limiterEntry[K]
 	oldest  list.List
 }
 
-type limiterEntry struct {
+type limiterEntry[K comparable] struct {
 	lim      *rate.Limiter
 	seen     time.Time
 	position *list.Element
 }
 
-func NewLimiter(r float64, burst int) *Limiter {
-	return &Limiter{rate: rate.Limit(r), burst: burst, entries: map[netip.Addr]*limiterEntry{}}
+func NewKeyed[K comparable](r float64, burst int) *Keyed[K] {
+	refill := time.Duration(float64(burst) / r * float64(time.Second))
+	return &Keyed[K]{rate: rate.Limit(r), burst: burst, idle: max(IdleTTL, refill), entries: map[K]*limiterEntry[K]{}}
 }
 
-func (l *Limiter) Allow(ip netip.Addr, now time.Time) bool {
-	ip = ClientKey(ip)
+func (l *Keyed[K]) Allow(key K, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.expire(now)
-	e, ok := l.entries[ip]
+	e, ok := l.entries[key]
 	if !ok {
 		if len(l.entries) >= MaxEntries {
 			return false
 		}
-		e = &limiterEntry{lim: rate.NewLimiter(l.rate, l.burst)}
-		e.position = l.oldest.PushBack(ip)
-		l.entries[ip] = e
+		e = &limiterEntry[K]{lim: rate.NewLimiter(l.rate, l.burst)}
+		e.position = l.oldest.PushBack(key)
+		l.entries[key] = e
 	}
 	e.seen = now
 	l.oldest.MoveToBack(e.position)
 	return e.lim.AllowN(now, 1)
 }
 
-func (l *Limiter) expire(now time.Time) {
+func (l *Keyed[K]) expire(now time.Time) {
 	for range expireBatch {
 		position := l.oldest.Front()
 		if position == nil {
 			return
 		}
-		ip := position.Value.(netip.Addr)
-		if now.Sub(l.entries[ip].seen) <= IdleTTL {
+		key := position.Value.(K)
+		if now.Sub(l.entries[key].seen) <= l.idle {
 			return
 		}
-		delete(l.entries, ip)
+		delete(l.entries, key)
 		l.oldest.Remove(position)
 	}
 }
 
-func (l *Limiter) Size() int {
+func (l *Keyed[K]) Size() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.entries)
+}
+
+type Limiter struct {
+	*Keyed[netip.Addr]
+}
+
+func NewLimiter(r float64, burst int) *Limiter {
+	return &Limiter{NewKeyed[netip.Addr](r, burst)}
+}
+
+func (l *Limiter) Allow(ip netip.Addr, now time.Time) bool {
+	return l.Keyed.Allow(ClientKey(ip), now)
 }
 
 type Gate struct {
